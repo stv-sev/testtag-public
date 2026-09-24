@@ -26,6 +26,9 @@ from typing import Optional
 
 TABELLE = "veroeffentlichung"
 ZEITUEBERSCHREITUNG = 5.0
+# Die öffentliche Ansicht nimmt ausschliesslich den Publishable Key. Ein Schreibschlüssel (`sb_secret_…`) und
+# ältere JWT-Schlüssel (`eyJ…`) werden abgelehnt – unabhängig davon, unter welchem Namen sie hinterlegt sind.
+PUBLISHABLE_PRAEFIX = "sb_publishable_"
 FELDER = ("oeffentliche_testtag_id", "bereich", "programm", "ak", "pruefsumme", "stand_am", "inhalt")
 
 STARTLISTE = "startliste"
@@ -101,6 +104,10 @@ def lade_zugang(secrets) -> Zugang:
         raise QuellenFehler("Die hinterlegte Adresse ist nicht sicher (https).")
     if not schluessel.strip():
         raise NichtEingerichtet("Für diese Ansicht ist noch kein Zugang hinterlegt.")
+    if not schluessel.startswith(PUBLISHABLE_PRAEFIX):
+        # Bewusst allgemein: Weder der Wert noch sein Anfang darf in einer Meldung erscheinen.
+        raise QuellenFehler("Der hinterlegte Zugang hat nicht die erwartete Form eines öffentlichen "
+                            "Leseschlüssels.")
     zeit = secrets.get("zeitueberschreitung", ZEITUEBERSCHREITUNG) if hasattr(secrets, "get") \
         else ZEITUEBERSCHREITUNG
     if not isinstance(zeit, (int, float)) or isinstance(zeit, bool) or not 0 < float(zeit) <= 60:
