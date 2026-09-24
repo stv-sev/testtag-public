@@ -1,0 +1,15 @@
+# Öffentliche Testtag-Ansicht – private Ablage.
+# Geheimnisse, lokale Daten und Bytecode gehören nie in diese Ablage.
+.streamlit/secrets.toml
+__pycache__/
+*.py[cod]
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+.env
+.env.*
+supabase.json
+Thumbs.db
+.DS_Store
