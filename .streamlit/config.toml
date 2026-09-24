@@ -1,0 +1,13 @@
+# Streamlit-Konfiguration der öffentlichen Testtag-Ansicht (E15b).
+# Ausschliesslich Gestaltung – keine Server-, Port-, Zugangs- oder Telemetrieoptionen und keine Geheimnisse.
+# Die Zugangsdaten (Publishable Key) liegen allein in den Streamlit-Cloud-Secrets, nie in dieser Datei.
+
+[theme]
+primaryColor = "#E6007E"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#D6EAF3"
+textColor = "#0D4E73"
+font = "sans-serif"
+
+[browser]
+gatherUsageStats = false
