@@ -13,3 +13,35 @@ __pycache__/
 supabase.json
 Thumbs.db
 .DS_Store
+
+# --- P0: Excel -> Diagnose-JSON -> Supabase Storage ---
+# Secrets und lokale Konfiguration
+!.env.example
+*.key
+*.pem
+secrets.*
+
+# Lokale Ausgaben
+out/
+*.json.tmp
+.*.tmp
+
+# Excel-Arbeitsmappen und temporäre Exceldateien
+*.xlsx
+*.xlsm
+*.xlsb
+*.xls
+~$*
+testtag-probe-*/
+
+# Python-Caches und Werkzeuge
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+build/
+dist/
+
+# Virtuelle Umgebungen
+.venv/
+venv/
+env/
