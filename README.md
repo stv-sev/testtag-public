@@ -433,3 +433,34 @@ Damit kann ein Lauf mit `--confirm-slug X` keinen anderen Testtag verändern, au
 übrigen Code.
 
 Die Betriebsanleitung für den Wettkampftag steht in [BETRIEB.md](BETRIEB.md).
+
+## P1H: Gestaltung der öffentlichen App
+
+Die App übernimmt die visuelle Sprache der öffentlichen AMM-Anzeige von Turnsport Aargau. Inhalte, Bezeichnungen
+und die gesamte Daten- und Publikationslogik bleiben testtagspezifisch und unverändert.
+
+- **Zentrale Gestaltung:** `STIL` in `app.py`. Alle Selektoren beginnen mit `tt-` oder mit dem Schlüssel des
+  Widgets (`st-key-bereich`, `st-key-rl_art`, `st-key-oeffnen-…`, `st-key-zurueck`).
+- **Farben:** Dunkelblau `#0D4E73`, Blau `#15608A`, Mittelblau `#2C7FA6`, Hellblau `#6FAFC9`, Fläche `#D6EAF3`,
+  Akzent Magenta `#E6007E`. Die Theme-Werte in `.streamlit/config.toml` sind identisch mit der Referenz.
+- **Komponenten:**
+  - Kopfband mit Logo, Verlauf und magentafarbener Unterkante;
+  - Status-Badges Live (pulsierend), Demnächst und Archiv;
+  - Navigation als Pillen mit mindestens 40 px Touch-Höhe;
+  - Live-Ticker-Karten und Ranglisten-Karten mit Rangkreis (Gold, Silber, Bronze) und Chips; ein Chip zeigt „–“,
+    solange kein Resultat veröffentlicht ist;
+  - Startlisten-Tabellen mit Titelleiste und fünf Spalten (Pos., Turner = Vorname Name, Jg., AK, Verein);
+  - Zeitplan als Zeilenliste ohne Tabelle; einheitliche leere Zustände und Fusszeile.
+- **Mobil:** Unter 640 px werden Abstände kleiner. Lange Namen und Vereine brechen um. Es gibt keine
+  `st.dataframe`-Tabellen und damit keinen horizontalen Tabellenüberlauf.
+- **Sicherheit der Darstellung:** Alle angezeigten Texte laufen durch `_h` und sind damit HTML-escaped. Zusätzlich
+  werden Zeichen entschärft, die Streamlit-Markdown auswerten würde (zum Beispiel `$`). Es gibt kein JavaScript.
+
+Assets (`assets/`):
+
+| Datei | Herkunft |
+|---|---|
+| `turnsport_aargau_logo.png` | Logo von Turnsport Aargau aus `amm/public_display/logo/Turnsport_Aargau_rgb.png` (lokales Referenzprojekt), verkleinert auf 271×96 px |
+
+Das Logo wird lokal eingebettet, ohne Hotlink. Bewusst nicht übernommen wurden die Webschrift Inter (Google Fonts,
+externe Abhängigkeit) sowie die AMM-Fachbegriffe und die AMM-Datenlogik.
