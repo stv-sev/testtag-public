@@ -124,7 +124,9 @@ Kanonische JSON-Form: `json.dumps(…, sort_keys=True, separators=(",", ":"), en
 
 1. Grösse und Änderungszeit erfassen, warten (`--stability-seconds`, Standard 2 s), erneut prüfen.
 2. OneDrive-Platzhalter (nicht lokal vorhandene Dateien) werden abgelehnt.
-3. Temporäre Kopie anlegen, nur diese lesen, danach entfernen. Die Quelle bleibt unverändert.
+3. Temporäre Kopie anlegen, nur diese lesen, danach entfernen. Die Quelle bleibt unverändert. Unter Windows
+   wird die Quelle nur lesend und mit vollständiger Freigabe (Lesen, Schreiben, Löschen) geöffnet, damit eine in
+   Excel geöffnete Mappe gelesen werden kann (P1I).
 4. Pflichtblätter `Public`, `Noteneingabe`, `Startliste`, `Zeitplan`; `Public!B2:B6` mit Beschriftungen in `A2:A6`.
 5. `Noteneingabe` wird zweimal geladen (Formeln / gespeicherte Resultate). openpyxl berechnet nichts.
    `dimension` = tatsächlich belegter Bereich, `dimension_declared` = in der Datei deklarierter Bereich.
@@ -357,8 +359,8 @@ entsprechen, sonst publiziert der Dauerbetrieb nichts.
 Ablauf je Takt (`TESTTAG_POLL_SECONDS`):
 
 1. Nur Grösse und Änderungszeit beider Dateien prüfen. Ist der Stand schon verarbeitet, passiert nichts.
-2. Bei einer Änderung warten, bis jede Datei in zwei aufeinanderfolgenden Takten unverändert ist. Excel-Sperrdateien
-   (`~$…`) spielen keine Rolle.
+2. Bei einer Änderung warten, bis jede Datei in zwei aufeinanderfolgenden Takten unverändert ist. Die Mappen dürfen
+   in Excel geöffnet sein. Excel-Sperrdateien (`~$…`) spielen keine Rolle (P1I).
 3. Beide Mappen gemeinsam über die sicheren temporären Kopien lesen und validieren, nie gemischt. Der Slug muss
    dem bestätigten entsprechen.
 4. Hat sich der Inhalt (SHA-256) nicht geändert, wird keine Anfrage gesendet. Sonst folgt eine P1C-Publikation: nur
@@ -464,3 +466,36 @@ Assets (`assets/`):
 
 Das Logo wird lokal eingebettet, ohne Hotlink. Bewusst nicht übernommen wurden die Webschrift Inter (Google Fonts,
 externe Abhängigkeit) sowie die AMM-Fachbegriffe und die AMM-Datenlogik.
+
+## P1I: Betrieb mit geöffneten, über OneDrive synchronisierten Arbeitsmappen
+
+Die produktiven Mappen bleiben während des Wettkampfs geöffnet. Kampfrichter bearbeiten sie in Excel Desktop mit
+AutoSpeichern, in Excel Online auf SharePoint oder gleichzeitig über Co-Authoring.
+
+```text
+Excel Desktop oder Excel Online
+→ SharePoint
+→ OneDrive-Synchronisierung auf dem Publisher-Laptop
+→ lokale synchronisierte XLSX-Datei
+→ Dauerpublisher
+→ Supabase
+→ öffentliche Streamlit-App
+```
+
+- Kein Zugriff über eine SharePoint- oder Graph-API. Der Publisher überwacht nur die lokale, von OneDrive
+  synchronisierte Datei und liest sie über eine temporäre Kopie. Die Originaldatei wird nie beschrieben.
+- Voraussetzungen: AutoSpeichern eingeschaltet, OneDrive angemeldet und aktiv, SharePoint-Ordner mit „Immer auf
+  diesem Gerät behalten“, grüner Synchronisierungsstatus vor dem Start.
+- Die Excel-Sperrdatei `~$…xlsx` wird ignoriert.
+- Gelesen wird erst nach zwei stabilen Prüfintervallen. Ein halb gespeicherter Stand (kein gültiger ZIP-Container,
+  Grösse oder Änderungszeit ändern sich während des Kopierens) führt zu einer Wiederholung, nie zu einer
+  Publikation. Ein Formelwert ohne von Excel gespeichertes Resultat wird abgelehnt (`FORMELRESULTAT_FEHLT`).
+- Pausierte oder unterbrochene Synchronisierung: Der letzte gültige Stand bleibt öffentlich. Nach der
+  Wiederaufnahme wird die Änderung automatisch erkannt und publiziert.
+
+**Korrektur (P1I):** Excel hält eine über OneDrive/SharePoint geöffnete Mappe mit Löschzugriff offen. Windows lässt
+dann nur Leser zu, die ihrerseits Löschen freigeben (`FILE_SHARE_DELETE`). Das bisherige `open()` gab das nicht
+frei. Jeder Leseversuch scheiterte deshalb mit „Exceldatei ist gesperrt“, und der Dauerpublisher publizierte bei
+geöffneter Mappe nie. `excel_probe.stable_temp_copy` öffnet die Quelle jetzt unter Windows mit `CreateFileW`,
+nur lesend und mit Freigabe für Lesen, Schreiben und Löschen. Ein wirklich exklusiv gesperrter Speicherstand wird
+weiterhin wie bisher wiederholt. Regressionstests: `OpenWorkbookTests` in `tests/test_live_runner.py`.

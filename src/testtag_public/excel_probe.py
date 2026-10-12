@@ -129,6 +129,34 @@ def wait_until_stable(
     return second
 
 
+def _open_shared(path: Path):
+    """Quelle nur lesend öffnen, ohne andere Programme zu behindern.
+
+    Excel (AutoSpeichern, OneDrive/SharePoint) hält die geöffnete Arbeitsmappe mit Lösch-/Umbenennungszugriff
+    offen. Windows erlaubt dann nur Leser, die FILE_SHARE_DELETE zulassen – `open()` tut das nicht und scheitert
+    mit einer Freigabeverletzung. Gelesen wird der zuletzt gespeicherte Stand; die Datei wird nie beschrieben.
+    """
+    if os.name != "nt":
+        return open(path, "rb")
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                                   wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    # GENERIC_READ; FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE; OPEN_EXISTING; FILE_ATTRIBUTE_NORMAL
+    handle = kernel.CreateFileW(str(path), 0x80000000, 0x7, None, 3, 0x80, None)
+    if handle in (None, wintypes.HANDLE(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())  # 32/33 → PermissionError, 2/3 → FileNotFoundError
+    try:
+        return os.fdopen(msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY), "rb")
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
+
+
 @contextlib.contextmanager
 def stable_temp_copy(
     path: Path, wait_seconds: float, sleep: Callable[[float], None] = time.sleep
@@ -139,7 +167,7 @@ def stable_temp_copy(
     with tempfile.TemporaryDirectory(prefix="testtag-probe-") as tmp:
         copy_path = Path(tmp) / "source.xlsx"
         try:
-            with open(path, "rb") as src, open(copy_path, "wb") as dst:
+            with _open_shared(path) as src, open(copy_path, "wb") as dst:
                 shutil.copyfileobj(src, dst, 1024 * 1024)
         except PermissionError:
             raise SourceError(f"Exceldatei ist gesperrt und kann nicht gelesen werden: {path.name}") from None

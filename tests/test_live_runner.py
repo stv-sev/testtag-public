@@ -1,6 +1,7 @@
 """P1F: Dauerpublisher – Änderungserkennung, Stabilität, Fehler, Wiederanlauf, Sperre, Protokoll (kein Netzwerk)."""
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -305,6 +306,85 @@ class FailureTests(Base):
         for expected in ("Publikation bestätigt", "Validierung fehlgeschlagen", "Wiederholung geplant",
                          "Datei stabil", "Änderung erkannt"):
             self.assertIn(expected, text)
+
+
+@contextlib.contextmanager
+def held_open(path: Path, access: int, share: int):
+    """Windows-Dateihandle wie ein anderes Programm halten (Excel, OneDrive)."""
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                                   wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    handle = kernel.CreateFileW(str(path), access, share, None, 3, 0x80, None)
+    if handle in (None, wintypes.HANDLE(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        yield
+    finally:
+        kernel.CloseHandle(handle)
+
+
+GENERIC_READ, DELETE = 0x80000000, 0x00010000
+SHARE_ALL = 0x7  # FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+
+
+class OpenWorkbookTests(Base):
+    """P1I: Arbeitsmappe bleibt in Excel geöffnet (AutoSpeichern, OneDrive/SharePoint)."""
+
+    @unittest.skipUnless(os.name == "nt", "Windows-Freigabemodus")
+    def test_workbook_open_in_excel_with_autosave_is_published(self):
+        runner = self.started()
+        self.write(AK5, scores={**AK5_SCORES, (2, "Pferd", 1): (5, 1, 5)})
+        (self.paths[AK5].parent / "~$ak5.xlsx").write_bytes(b"lock")
+        before, calls = self.paths[AK5].read_bytes(), len(self.api.calls)
+        # So hält Excel eine synchronisierte Mappe offen: mit Löschzugriff, Lesen für andere erlaubt.
+        with held_open(self.paths[AK5], GENERIC_READ | DELETE, SHARE_ALL):
+            with self.assertRaises(PermissionError):  # Ursache des Fehlers vor P1I: open() ohne FILE_SHARE_DELETE
+                open(self.paths[AK5], "rb").close()
+            self.assertEqual(self.ticks(runner, 3), ["in_bearbeitung", "publiziert", "keine_aenderung"])
+            self.assertEqual(len(self.batches(calls)), 1)
+        self.assertEqual(self.paths[AK5].read_bytes(), before)  # Quelle nie beschrieben
+        self.assertFalse(any(line.startswith("Dateifehler") for line in self.logs))
+
+    @unittest.skipUnless(os.name == "nt", "Windows-Freigabemodus")
+    def test_restart_with_open_workbook_writes_nothing(self):
+        self.started()
+        before = len(self.api.calls)
+        with held_open(self.paths[AK5], GENERIC_READ | DELETE, SHARE_ALL), \
+                held_open(self.paths[AK9], GENERIC_READ | DELETE, SHARE_ALL):
+            restarted = self.runner()
+            self.assertEqual(self.ticks(restarted, 3), ["in_bearbeitung", "unveraendert", "keine_aenderung"])
+        self.assertEqual(self.writes(before), [])
+
+    @unittest.skipUnless(os.name == "nt", "Windows-Freigabemodus")
+    def test_exclusive_lock_is_retried_and_published_after_release(self):
+        runner = self.started()
+        calls = len(self.api.calls)
+        self.write(AK5, scores={**AK5_SCORES, (2, "Pferd", 1): (5, 1, 5)})
+        with held_open(self.paths[AK5], GENERIC_READ, 0):  # z. B. Synchronisation ersetzt die Datei gerade
+            self.assertEqual(self.ticks(runner, 2), ["in_bearbeitung", "wiederholung_geplant"])
+        self.assertEqual(self.api.calls[calls:], [])
+        self.assertIn("gesperrt", next(line for line in self.logs if line.startswith("Dateifehler")))
+        self.clock[0] += 5
+        self.assertEqual(runner.tick(), "publiziert")
+
+    def test_partially_saved_file_is_never_published(self):
+        runner = self.started()
+        tid = next(iter(self.api.testtage))
+        rows = json.dumps(sorted(map(list, self.api.rows.items())), sort_keys=True)
+        calls = len(self.api.calls)
+        complete = self.paths[AK5].read_bytes()
+        self.paths[AK5].write_bytes(complete[: len(complete) // 2])  # abgebrochener Speicher-/Synchronisationsstand
+        self.touch(AK5)
+        self.assertEqual(self.ticks(runner, 2), ["in_bearbeitung", "wiederholung_geplant"])
+        self.assertEqual(self.api.calls[calls:], [])
+        self.assertEqual(json.dumps(sorted(map(list, self.api.rows.items())), sort_keys=True), rows)
+        self.assertFalse(any("Validierung" in line for line in self.logs))
+        self.write(AK5, scores={**AK5_SCORES, (2, "Pferd", 1): (5, 1, 5)})  # vollständig synchronisiert
+        self.assertEqual(self.ticks(runner, 2), ["in_bearbeitung", "publiziert"])
+        self.assertEqual(self.api.testtage[tid]["status"], "live")
 
 
 class InstanceLockTests(unittest.TestCase):

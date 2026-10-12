@@ -191,14 +191,12 @@ class ExcelProbeTests(unittest.TestCase):
 
     def test_locked_file_aborts(self):
         path = self.wb()
-        real_open = open
 
-        def fake_open(file, mode="r", *args, **kwargs):
-            if Path(file) == path and "r" in mode:
-                raise PermissionError("gesperrt")
-            return real_open(file, mode, *args, **kwargs)
+        def fake_open(file):
+            self.assertEqual(Path(file), path)
+            raise PermissionError("gesperrt")
 
-        with mock.patch("builtins.open", side_effect=fake_open):
+        with mock.patch.object(excel_probe, "_open_shared", side_effect=fake_open):
             with self.assertRaises(SourceError) as ctx:
                 probe(path)
         self.assertIn("gesperrt", str(ctx.exception))

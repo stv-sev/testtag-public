@@ -7,15 +7,42 @@ Alle Befehle werden in PowerShell im Projektordner `testtag-public` ausgeführt.
 > `Public!B6` (Freigabe) und `Public!B5` (freigegebene Rotation) entscheiden, was öffentlich wird.
 > Solange die Mappen Testwerte enthalten, darf der Dauerpublisher **nicht** mit dem produktiven Slug laufen.
 
+## Datenfluss
+
+```text
+Excel Desktop oder Excel Online
+→ SharePoint
+→ OneDrive-Synchronisierung auf dem Publisher-Laptop
+→ lokale synchronisierte XLSX-Datei
+→ Dauerpublisher
+→ Supabase
+→ öffentliche Streamlit-App
+```
+
+- Der Publisher greift **nicht** über eine SharePoint-API zu. Er überwacht nur die lokale, von OneDrive
+  synchronisierte Datei und liest sie über eine temporäre Kopie. Die Originaldatei wird nie beschrieben.
+- Die Arbeitsmappen **dürfen und sollen während des ganzen Wettkampfs geöffnet bleiben**: in Excel Desktop mit
+  AutoSpeichern, in Excel Online auf SharePoint und gleichzeitig durch mehrere Kampfrichter (Co-Authoring).
+- Gelesen wird der letzte vollständig gespeicherte und synchronisierte Stand, erst wenn die Datei zwei
+  Prüfintervalle lang unverändert ist. Ein halb gespeicherter oder noch nicht vollständig synchronisierter Stand
+  wird nicht publiziert.
+- Die Excel-Sperrdatei `~$…xlsx` ist normal und wird ignoriert.
+- Ist OneDrive pausiert oder unterbrochen, bleiben öffentlich die letzten gültigen Daten sichtbar. Nach der
+  Wiederaufnahme werden die Änderungen automatisch nachgezogen.
+- Excel Desktop auf dem Publisher-Laptop speichert direkt in die lokale Datei. Seine Änderungen werden auch bei
+  pausiertem OneDrive publiziert. Änderungen aus Excel Online oder von anderen Geräten kommen erst nach der
+  Synchronisierung an.
+
 ## Vor dem Wettkampf
 
 1. **`.env` prüfen:** `python -B -m testtag_public.local_config` (mit `$env:PYTHONPATH = "src"`) zeigt nur
    `gesetzt` oder `fehlt`, nie Werte. Alle sechs Variablen müssen gesetzt sein, auch die beiden Arbeitsmappenpfade.
    Schlüssel nie in Chat, Ticket, E-Mail oder Kommandozeile kopieren.
-2. **OneDrive:** Beide Mappen müssen das grüne Häkchen tragen. Im Explorer „Immer auf diesem Gerät behalten“ wählen.
-   Nur teilweise synchronisierte Dateien werden abgelehnt.
-3. **Excel:** Die Mappen auf dem Publikationslaptop schliessen. Im Ordner dürfen keine Sperrdateien `~$…xlsx` von
-   diesem Laptop liegen.
+2. **OneDrive:** OneDrive muss angemeldet und aktiv sein (nicht pausiert). Für den SharePoint-Ordner der beiden
+   Mappen im Explorer „Immer auf diesem Gerät behalten“ wählen. Vor dem Start müssen beide Mappen den grünen
+   Synchronisierungsstatus zeigen. Nur online verfügbare Dateien (Wolkensymbol) werden abgelehnt.
+3. **Excel:** Die Mappen dürfen geöffnet sein und bleiben es während des Wettkampfs. In Excel Desktop muss
+   **AutoSpeichern** eingeschaltet sein (Schalter oben links). Excel Online speichert immer automatisch.
 4. **Prüflauf ohne Netzwerk:** `.\start_live.cmd --check`. Erwartet wird der Event-Slug, beide Programme,
    die Anzahl Publikationszeilen und `Prüfung erfolgreich`. Es wird nichts geschrieben.
 5. **Testwerte entfernen:** Alle Probe- und Testeinträge aus den Mappen löschen. Zur Kontrolle `--check` erneut
@@ -48,11 +75,14 @@ Alle Befehle werden in PowerShell im Projektordner `testtag-public` ausgeführt.
 | `Abgleich bestätigt … keine Schreibanfrage` | Der öffentliche Stand ist schon aktuell. |
 | `Inhalt unverändert (nur Speicherzeitpunkt)` | Gespeichert ohne Inhaltsänderung. Es wird nichts gesendet. |
 | `Netzwerk-/Datenbankfehler … Wiederholung geplant in n s` | Der alte öffentliche Stand bleibt. Neuer Versuch folgt automatisch. |
-| `Dateifehler … Wiederholung geplant` | Die Datei ist gesperrt oder fehlt. Der Versuch wird automatisch wiederholt. |
+| `Dateifehler … Wiederholung geplant` | Die Datei wird gerade gespeichert oder synchronisiert, oder sie fehlt. Der Versuch wird automatisch wiederholt. |
 | `Validierung fehlgeschlagen (CODE)` | Ein Eingabefehler in Excel. Der alte Stand bleibt, siehe Fehlerfall. |
 | `Archivstatus: Testtag archiviert` | Der Testtag ist abgeschlossen. Es wird nichts mehr publiziert. |
 
-- **Excel speichern:** Normal speichern genügt. Der Publisher wartet, bis die Datei stabil ist.
+- **Excel offen lassen:** Die Mappen nicht zwischen den Eingaben schliessen. AutoSpeichern speichert nach wenigen
+  Sekunden bis rund einer Minute. Der Publisher wartet, bis die Datei stabil ist, und publiziert dann automatisch.
+- **OneDrive-Status:** Grün bedeutet synchron. „Upload ausstehend“ bei einer in Excel Desktop geöffneten Mappe ist
+  normal, Excel lädt selbst hoch.
 - **Netzwerkunterbruch:** Nichts tun. Nach der Wiederverbindung wird der letzte Stand automatisch nachpubliziert.
 - **Rotation freigeben:** In beiden Mappen `Public!B5` auf die abgeschlossene Rotation setzen und speichern. Die
   Resultate dieser Rotation erscheinen dann in Live zuoberst.
@@ -84,8 +114,10 @@ Alle Befehle werden in PowerShell im Projektordner `testtag-public` ausgeführt.
 
 | Situation | Vorgehen |
 |---|---|
-| Excel gerade gesperrt | Nichts tun, es wird automatisch wiederholt. Hält es an, die Mappe auf dem Laptop schliessen. |
+| Datei kurz gesperrt | Nichts tun, es wird automatisch wiederholt. Excel muss dafür nicht geschlossen werden. |
+| `Dateifehler` hält über mehrere Minuten an | OneDrive-Status und AutoSpeichern prüfen. Excel bleibt offen. Mit der technischen Verantwortung klären. |
 | OneDrive noch nicht synchron | Auf das grüne Häkchen warten. „Immer auf diesem Gerät behalten“ wählen. |
+| OneDrive pausiert oder abgemeldet | Synchronisierung fortsetzen oder anmelden. Bis dahin bleibt der letzte gültige Stand öffentlich, danach wird automatisch nachgezogen. |
 | Internet unterbrochen | Nichts tun. Der alte Stand bleibt öffentlich, nach der Wiederverbindung wird automatisch nachpubliziert. |
 | Supabase nicht erreichbar | Wie Internet. Hält es an, den Status von Supabase prüfen. Den Publisher nicht wiederholt neu starten. |
 | `läuft bereits (PID …)` | Ein Publisher läuft schon, das andere Fenster suchen. Keinen zweiten starten. |
