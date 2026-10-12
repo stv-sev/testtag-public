@@ -12,6 +12,10 @@ Ablauf je Takt (`TESTTAG_POLL_SECONDS`, Standard 1 s, zulässig 1–60):
 4. Nur geänderte Arbeitsmappen über die sicheren temporären Kopien lesen; eine unveränderte Mappe (gleiche Grösse
    und Änderungszeit wie beim letzten erfolgreichen Lesen) wird nicht erneut gelesen. Beide gemeinsam validieren.
 5. Identischer Inhalt (SHA-256) wie zuletzt publiziert: keine Anfrage (z. B. Speichern ohne Änderung).
+   Zusätzlicher Auslöser bei unveränderter Datei (`excel_live`): Ist die Mappe in Excel Desktop geöffnet, wird
+   ihr Stand alle `OFFEN_SEKUNDEN` geprüft. Ändert er sich (z. B. eine Excel-Online-Eingabe über Co-Authoring,
+   ohne neuen Speicherstand der Datei) und bleibt er zwei Prüfungen lang gleich bei abgeschlossener Berechnung,
+   wird eine Kopie (`SaveCopyAs`) wie eine Datei gelesen, validiert und publiziert.
 6. Sonst P1C-Publikation (`database_publisher.publish`): nur geänderte Zeilen, öffentliches Rücklesen.
 7. Erst nach Erfolg gilt der kombinierte Stand als verarbeitet.
 
@@ -37,13 +41,15 @@ import math
 import os
 import sys
 import threading
+import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional, TextIO
 
 from . import database_publisher as dp
+from . import excel_live
 from . import local_config
 from . import supabase_database as db
 from .excel_probe import ProbeError, SourceError, _snapshot
@@ -59,6 +65,7 @@ LOG_BYTES = 256 * 1024
 LOG_BACKUPS = 3
 MAX_BACKOFF = 60
 STABIL_SEKUNDEN = 2  # Mindestdauer ohne Änderung von Grösse/Änderungszeit vor dem Lesen
+OFFEN_SEKUNDEN = 2  # Abstand der Prüfungen einer in Excel geöffneten Mappe
 LOCK_EXIT = 10
 SLUG_ABWEICHUNG = "SLUG_ABWEICHUNG"
 
@@ -207,7 +214,8 @@ class Runner:
     def __init__(self, config: db.DatabaseConfig, paths: dict[str, Path], *, confirm_slug: str, poll: int,
                  log: Callable[[str], None], report: Optional[SafeReport] = None, transport=None,
                  now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-                 monotonic: Callable[[], float] = time.monotonic, read=read_program_source, publish=dp.publish):
+                 monotonic: Callable[[], float] = time.monotonic, read=read_program_source, publish=dp.publish,
+                 offen: Optional[dict] = None):
         self.config, self.paths, self.slug, self.poll = config, paths, confirm_slug, poll
         self.log, self.report, self.transport = log, report, transport
         self.now, self.monotonic, self.read, self.publish = now, monotonic, read, publish
@@ -223,6 +231,10 @@ class Runner:
         self.archiviert = False
         self.publikationen = 0
         self._notiert: set = set()
+        self.offen = offen or {}  # Programm -> excel_live.OffeneMappe (nur Windows mit Excel Desktop)
+        self.offen_basis: dict[str, str] = {}  # zuletzt verarbeiteter Fingerabdruck der geöffneten Mappe
+        self.offen_kandidat: dict[str, str] = {}
+        self.offen_naechste = 0.0
 
     # Hilfen
     def _note(self, key, text: str) -> None:
@@ -261,7 +273,7 @@ class Runner:
         self.last_stat = dict(stats)
         combined = tuple(stats[p] for p in PROGRAMME)
         if self.verarbeitet is not None and combined == self.verarbeitet.stats:
-            return "keine_aenderung"
+            return self._offen_pruefen(combined)
         for program in PROGRAMME:
             if stats[program][0] == "fehler":
                 self._note((combined, program, "fehler"),
@@ -297,6 +309,10 @@ class Runner:
         except PublicationError as exc:
             return self._invalid(exc, combined)
         self.gelesen = {p: (combined[i], sources[i]) for i, p in enumerate(PROGRAMME)}
+        self.offen_basis.clear()  # geöffneten Stand danach einmal abgleichen (Kopie, ohne Anfrage wenn gleich)
+        return self._veroeffentlichen(sources, combined)
+
+    def _veroeffentlichen(self, sources: list, combined: tuple, wann: str = "nach der nächsten Dateiänderung") -> str:
         shas = tuple(s.source.sha256 for s in sources)
         if self.verarbeitet is not None and shas == self.verarbeitet.shas:
             self._done(combined, shas)
@@ -309,7 +325,7 @@ class Runner:
         try:
             outcome = self.publish(self.config, sources, observed_at=self.now(), transport=self.transport)
         except PublicationError as exc:
-            return self._invalid(exc, combined)
+            return self._invalid(exc, combined, wann)
         except dp.PublisherError as exc:
             if exc.code == dp.PublisherCode.TESTTAG_ARCHIVIERT:
                 self.archiviert = True
@@ -335,10 +351,80 @@ class Runner:
             self.log("Kein Programm freigegeben und kein Testtag vorhanden – nichts publiziert")
         return outcome.status
 
-    def _invalid(self, exc: PublicationError, combined: tuple) -> str:
+    # Geöffnete Excel-Mappe (zusätzlicher Auslöser bei unveränderter Datei)
+    def _offen_pruefen(self, combined: tuple) -> str:
+        if not self.offen or self.archiviert or self.monotonic() < self.offen_naechste:
+            return "keine_aenderung"
+        if self.retry_at is not None and self.monotonic() < self.retry_at:
+            return "wartet_auf_wiederholung"
+        self.offen_naechste = self.monotonic() + OFFEN_SEKUNDEN
+        stabil = {}
+        for program, mappe in self.offen.items():
+            zustand = mappe.zustand()
+            fp = zustand.fingerabdruck
+            if zustand.grund == excel_live.BERECHNUNG_MANUELL:
+                self._note(("manuell", program), f"{program}: Excel-Berechnung ist manuell – der geöffnete Stand "
+                                                 "wird nicht verwendet")
+            if fp is None or fp == self.offen_basis.get(program):
+                self.offen_kandidat.pop(program, None)
+                continue
+            if self.offen_kandidat.get(program) != fp:  # erst bei gleicher nächster Prüfung
+                self.offen_kandidat[program] = fp
+                continue
+            stabil[program] = fp
+        if not stabil:
+            return "offen_in_bearbeitung" if self.offen_kandidat else "keine_aenderung"
+        return self._offen_lesen(combined, stabil)
+
+    def _offen_lesen(self, combined: tuple, stabil: dict) -> str:
+        with tempfile.TemporaryDirectory(prefix="testtag-offen-") as tmp:
+            kopien = {}
+            for program, fp in stabil.items():
+                ziel = Path(tmp) / program / self.paths[program].name  # gleicher Dateiname für Meldungen
+                ziel.parent.mkdir()
+                if not self.offen[program].kopie(ziel, fp):
+                    self.offen_kandidat.pop(program, None)  # Stand ändert sich noch: nächste Prüfungen abwarten
+                    return "offen_in_bearbeitung"
+                kopien[program] = ziel
+            try:
+                neu = {p: self.read(path, wait_seconds=0, sleep=lambda _s: None) for p, path in kopien.items()}
+            except SourceError as exc:
+                self.log(f"Excel-Stand nicht lesbar ({self._clean(str(exc))}) – alter Stand bleibt")
+                return "offen_in_bearbeitung"
+            except PublicationError as exc:
+                self.offen_basis.update(stabil)  # diesen Stand nicht erneut prüfen
+                return self._invalid(exc, combined, "nach der nächsten Änderung")
+        bisher = {p: self.gelesen[p][1] for p in PROGRAMME if p in self.gelesen}
+        geaendert = [p for p, src in neu.items() if p not in bisher or _inhalt(src) != _inhalt(bisher[p])]
+        if not geaendert:
+            self.offen_basis.update(stabil)
+            for p in stabil:
+                self.offen_kandidat.pop(p, None)
+            return "keine_aenderung"
+        self.log(f"Excel-Stand geändert: {', '.join(geaendert)} – geöffnete Arbeitsmappe ohne neuen Speicherstand "
+                 "wird über eine Kopie gelesen")
+        try:
+            sources = [neu.get(p) or self.gelesen[p][1] for p in PROGRAMME]
+            for source, program in zip(sources, PROGRAMME):
+                _check_program(source, program, OPTIONEN[program])
+            if {s.public.get("event_id") for s in sources} != {self.slug}:
+                raise PublicationError([Issue(SLUG_ABWEICHUNG, "Public!B2 entspricht nicht dem bestätigten Slug.")])
+        except PublicationError as exc:
+            self.offen_basis.update(stabil)
+            return self._invalid(exc, combined, "nach der nächsten Änderung")
+        status = self._veroeffentlichen(sources, combined, "nach der nächsten Änderung")
+        if status != "wiederholung_geplant":  # Netzwerkfehler: gleicher Stand wird erneut versucht
+            self.offen_basis.update(stabil)
+            for p in stabil:
+                self.offen_kandidat.pop(p, None)
+        if status not in ("wiederholung_geplant", "validierung_fehler"):
+            for i, p in enumerate(PROGRAMME):  # gilt bis zur nächsten Dateiänderung als aktueller Inhalt
+                self.gelesen[p] = (combined[i], sources[i])
+        return status
+
+    def _invalid(self, exc: PublicationError, combined: tuple, wann: str = "nach der nächsten Dateiänderung") -> str:
         self.blocked = combined
-        self.log(f"Validierung fehlgeschlagen ({', '.join(exc.codes)}) – alter Stand bleibt, "
-                 "neuer Versuch nach der nächsten Dateiänderung")
+        self.log(f"Validierung fehlgeschlagen ({', '.join(exc.codes)}) – alter Stand bleibt, neuer Versuch {wann}")
         return "validierung_fehler"
 
     def run(self, *, stop: Optional[threading.Event] = None, sleep: Callable[[float], None] = time.sleep,
@@ -358,6 +444,12 @@ class Runner:
                 stop.wait(self.poll)
             else:
                 sleep(self.poll)
+
+
+def _inhalt(source) -> str:
+    """Fachlicher Inhalt einer gelesenen Mappe ohne Dateimerkmale (Name, Bytes, SHA-256 der Datei)."""
+    daten = {k: v for k, v in asdict(source).items() if k != "source"}
+    return hashlib.sha256(repr(daten).encode("utf-8")).hexdigest()
 
 
 # ── Kommandozeile ────────────────────────────────────────────────────────────────────────────────────────
@@ -425,8 +517,14 @@ def main(argv: Optional[list[str]] = None, *, environ=None, out_dir: Optional[Pa
         log = BetriebsLog(stdout, report, out_dir / LOG_NAME)
         log(f"Start: Dauerpublisher für {args.confirm_slug} (Programme {', '.join(PROGRAMME)}, Takt {poll} s, "
             f"Sperre {lock_state}). Beenden mit Ctrl+C.")
+        offen = None
+        if os.name == "nt" and excel_live.verfuegbar():
+            offen = {p: excel_live.OffeneMappe(paths[p]) for p in PROGRAMME}
+        else:
+            log("Hinweis: Beobachtung geöffneter Excel-Mappen nicht verfügbar (nur Windows mit pywin32) – "
+                "es zählt nur der Speicherstand der Dateien")
         runner = Runner(config, paths, confirm_slug=args.confirm_slug, poll=poll, log=log, report=report,
-                        transport=SlugScope(transport, args.confirm_slug))
+                        transport=SlugScope(transport, args.confirm_slug), offen=offen)
         try:
             runner.run(stop=stop)
             log("Ende: Dauerpublisher beendet")

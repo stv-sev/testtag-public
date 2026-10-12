@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import contextlib
+import copy
+import hashlib
 import io
 import json
 import os
@@ -20,6 +22,7 @@ from _support import (AK5, AK9, TEST_ENV, TEST_PUBLISHABLE_KEY, TEST_SECRET_KEY,
                       FakeDataApi, make_testtag_workbook)
 
 from testtag_public import database_publisher as dp
+from testtag_public import excel_live as el
 from testtag_public import live_runner as lr
 from testtag_public import supabase_database as db
 from testtag_public.excel_probe import SourceError
@@ -410,6 +413,142 @@ class OpenWorkbookTests(Base):
         self.write(AK5, scores={**AK5_SCORES, (2, "Pferd", 1): (5, 1, 5)})  # vollständig synchronisiert
         self.assertEqual(self.ticks(runner, 2), ["in_bearbeitung", "publiziert"])
         self.assertEqual(self.api.testtage[tid]["status"], "live")
+
+
+class FakeOffen:
+    """Attrappe einer in Excel Desktop geöffneten Mappe: `stand` = Mappenspezifikation des geöffneten Stands."""
+
+    def __init__(self, program: str, stand: dict | None):
+        self.program, self.stand, self.grund, self.kopien, self.waehrend_kopie = program, stand, None, 0, None
+
+    def zustand(self):
+        if self.grund:
+            return el.Zustand(None, self.grund)
+        if self.stand is None:
+            return el.Zustand(None, el.NICHT_GEOEFFNET)
+        return el.Zustand(hashlib.sha256(repr(sorted(self.stand.items(), key=str)).encode()).hexdigest())
+
+    def kopie(self, ziel, erwartet):
+        if self.zustand().fingerabdruck != erwartet:
+            return False
+        self.kopien += 1
+        make_testtag_workbook(Path(ziel), self.program, **self.stand)
+        if self.waehrend_kopie:
+            self.waehrend_kopie()
+            return self.zustand().fingerabdruck == erwartet
+        return True
+
+
+class OpenExcelStateTests(Base):
+    """Excel-Online-Eingabe erscheint in der geöffneten Desktop-Mappe, die Datei erhält keinen neuen Speicherstand."""
+
+    def setUp(self):
+        super().setUp()
+        self.runner_ = self.started()
+        self.offen = FakeOffen(AK5, copy.deepcopy(self.specs[AK5]))
+        self.runner_.offen = {AK5: self.offen}
+        self.datei = self.paths[AK5].read_bytes()
+
+    def pruefen(self, n: int = 1) -> list[str]:
+        out = []
+        for _ in range(n):
+            self.clock[0] += lr.OFFEN_SEKUNDEN
+            out.append(self.runner_.tick())
+        return out
+
+    def online(self, **changes) -> None:
+        stand = copy.deepcopy(self.offen.stand)
+        stand.update(changes)
+        self.offen.stand = stand
+
+    def test_unchanged_open_state_is_compared_once_then_never_copied_again(self):
+        calls = len(self.api.calls)
+        self.assertEqual(self.pruefen(2), ["offen_in_bearbeitung", "keine_aenderung"])  # gleicher Inhalt
+        self.assertEqual(self.offen.kopien, 1)
+        self.assertEqual(set(self.pruefen(5)), {"keine_aenderung"})
+        self.assertEqual(self.offen.kopien, 1)
+        self.assertEqual(self.api.calls[calls:], [])
+
+    def test_online_entry_without_new_file_state_is_published(self):
+        self.pruefen(2)
+        reads, calls = len(self.reads), len(self.api.calls)
+        self.online(scores={**AK5_SCORES, (2, "Pferd", 1): (5, 1, 5)})
+        self.assertEqual(self.pruefen(2), ["offen_in_bearbeitung", "publiziert"])
+        self.assertEqual(self.paths[AK5].read_bytes(), self.datei)  # Original unverändert, kein Speicherstand
+        self.assertNotIn(self.paths[AK5], self.reads[reads:])  # gelesen wurde nur die Kopie
+        (batch,) = self.batches(calls)
+        self.assertEqual({(r["bereich"], r["ak"]) for r in batch["body"]},
+                         {("resultate_live", "AK 7"), ("resultate_rangliste", "AK 7")})
+        self.assertIn("Excel-Stand geändert: AK5-AK9+ – geöffnete Arbeitsmappe ohne neuen Speicherstand wird über "
+                      "eine Kopie gelesen", self.logs)
+        kopien, calls = self.offen.kopien, len(self.api.calls)
+        self.assertEqual(set(self.pruefen(5)), {"keine_aenderung"})  # derselbe Stand nicht erneut verarbeitet
+        self.assertEqual((self.offen.kopien, len(self.api.calls)), (kopien, calls))
+
+    def test_later_save_of_same_content_writes_nothing(self):
+        self.pruefen(2)
+        neu = {**AK5_SCORES, (2, "Pferd", 1): (5, 1, 5)}
+        self.online(scores=neu)
+        self.pruefen(2)
+        calls = len(self.api.calls)
+        self.write(AK5, scores=neu)  # Excel speichert später denselben Stand in die Datei
+        self.assertIn(self.ticks(self.runner_, 2)[1], ("unveraendert", "inhalt_unveraendert"))
+        self.assertEqual(set(self.pruefen(3)), {"offen_in_bearbeitung", "keine_aenderung"})
+        self.assertEqual(self.writes(calls), [])
+
+    def test_unstable_or_incomplete_open_state_is_never_published(self):
+        self.pruefen(2)
+        calls, kopien = len(self.api.calls), self.offen.kopien
+        for grund in (el.BERECHNUNG_LAEUFT, el.BESCHAEFTIGT, el.BERECHNUNG_MANUELL):
+            self.offen.grund = grund
+            self.online(scores={**AK5_SCORES, (2, "Pferd", 1): (5, 1, 5)})
+            self.assertEqual(set(self.pruefen(3)), {"keine_aenderung"})
+        self.assertIn("AK5-AK9+: Excel-Berechnung ist manuell – der geöffnete Stand wird nicht verwendet", self.logs)
+        self.offen.grund = None
+        for punkte in (6, 7, 8):  # Stand ändert sich bei jeder Prüfung: nie stabil
+            self.online(scores={**AK5_SCORES, (2, "Pferd", 1): (punkte, 1, punkte)})
+            self.assertEqual(self.pruefen(), ["offen_in_bearbeitung"])
+        self.assertEqual((self.offen.kopien, self.api.calls[calls:]), (kopien, []))
+        self.offen.waehrend_kopie = lambda: self.online(scores={**AK5_SCORES, (2, "Pferd", 1): (9, 1, 9)})
+        self.assertEqual(self.pruefen(), ["offen_in_bearbeitung"])  # Änderung während der Kopie: verworfen
+        self.assertEqual(self.api.calls[calls:], [])
+
+    def test_formula_without_result_or_invalid_entry_keeps_old_state(self):
+        self.pruefen(2)
+        rows = json.dumps(sorted(map(list, self.api.rows.items())), sort_keys=True)
+        calls = len(self.api.calls)
+        for aenderung, code in ((dict(scores={**AK5_SCORES, (2, "Pferd", 1): (5, 1, "=AB15*AC15")}),
+                                 "FORMELRESULTAT_FEHLT"),
+                                (dict(direct={(1, "Kraft", 1): 8}), "ATHLETIK_BEIDE_QUELLEN")):
+            with self.subTest(code=code):
+                self.online(**aenderung)
+                self.assertEqual(self.pruefen(2), ["offen_in_bearbeitung", "validierung_fehler"])
+                self.assertTrue(any(code in line and "neuer Versuch nach der nächsten Änderung" in line
+                                    for line in self.logs))
+                kopien = self.offen.kopien
+                self.assertEqual(set(self.pruefen(3)), {"keine_aenderung"})  # derselbe Stand nicht erneut
+                self.assertEqual(self.offen.kopien, kopien)
+                self.online(scores=AK5_SCORES, direct={})
+                self.pruefen(2)
+        self.assertEqual(self.writes(calls), [])
+        self.assertEqual(json.dumps(sorted(map(list, self.api.rows.items())), sort_keys=True), rows)
+
+    def test_closed_workbook_uses_file_path_unchanged(self):
+        self.offen.stand = None  # Mappe in Excel geschlossen
+        calls = len(self.api.calls)
+        self.write(AK5, scores={**AK5_SCORES, (2, "Pferd", 1): (5, 1, 5)})
+        self.assertEqual(self.ticks(self.runner_, 2), ["in_bearbeitung", "publiziert"])
+        self.assertEqual(len(self.batches(calls)), 1)
+        self.assertEqual(self.offen.kopien, 0)
+
+    def test_network_error_from_open_state_is_retried(self):
+        self.pruefen(2)
+        self.api.offline = True
+        self.online(scores={**AK5_SCORES, (2, "Pferd", 1): (5, 1, 5)})
+        self.assertEqual(self.pruefen(2), ["offen_in_bearbeitung", "wiederholung_geplant"])
+        self.api.offline = False
+        self.clock[0] += 60
+        self.assertIn("publiziert", self.pruefen(2))  # derselbe Stand wird nach dem Fehler erneut versucht
 
 
 class InstanceLockTests(unittest.TestCase):

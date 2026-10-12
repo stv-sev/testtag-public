@@ -368,6 +368,20 @@ Ablauf je Takt (`TESTTAG_POLL_SECONDS`):
 3. Nur geänderte Mappen über die sicheren temporären Kopien lesen. Eine Mappe mit gleicher Grösse und Änderungszeit
    wie beim letzten erfolgreichen Lesen wird nicht erneut gelesen. Beide gemeinsam validieren; der Slug muss dem
    bestätigten entsprechen. Nach einem Neustart werden beide gelesen.
+
+   **Geöffnete Excel-Mappe als zusätzlicher Auslöser** (`excel_live.py`, nur Windows mit Excel Desktop und
+   `pywin32`): Eine in Excel Online eingegebene Note erscheint über Co-Authoring in der geöffneten Desktop-Mappe,
+   die lokale Datei erhält aber oft erst nach bis zu rund 1,5 Minuten einen neuen Speicherstand. Ist die Datei
+   unverändert, prüft der Publisher deshalb alle 2 s einen Fingerabdruck der vom Publisher gelesenen Blätter in der
+   geöffneten Mappe (nur lesen). Ändert er sich und bleibt er zwei Prüfungen lang gleich, wird mit
+   `SaveCopyAs` eine temporäre Kopie erstellt und wie eine Datei gelesen, validiert und publiziert. Voraussetzungen:
+   Berechnung automatisch und abgeschlossen, Excel nicht beschäftigt (keine Zelle in Bearbeitung), Fingerabdruck und
+   Berechnungsstatus vor und nach der Kopie gleich. Fehlende Formelresultate oder Excel-Fehlerwerte in der Kopie
+   führen wie beim Dateiweg zu keiner Publikation. `SaveCopyAs` verändert weder die Originaldatei noch ihren
+   Speicherzustand und lädt nichts hoch (nachgewiesen an einer Testmappe; Excel setzt nur die Eigenschaft
+   „Zuletzt gespeichert“ der geöffneten Mappe im Speicher). Derselbe Excel-Stand wird nie zweimal verarbeitet;
+   speichert Excel ihn später in die Datei, folgt ein Abgleich ohne Schreibanfrage. Ist die Mappe nicht geöffnet,
+   gilt unverändert nur der Dateiweg.
 4. Hat sich der Inhalt (SHA-256) nicht geändert, wird keine Anfrage gesendet. Sonst folgt eine P1C-Publikation: nur
    geänderte Zeilen, öffentliches Rücklesen, gleiche Regeln für Korrektur, Rotationsgrenze und Sperre.
 5. Erst nach Erfolg gilt der kombinierte Stand als verarbeitet.

@@ -82,6 +82,11 @@ Excel Desktop oder Excel Online
 
 - **Excel offen lassen:** Die Mappen nicht zwischen den Eingaben schliessen. Der Publisher wartet, bis die Datei
   stabil ist, und publiziert dann automatisch.
+- **Excel Online:** Eingaben erscheinen über Co-Authoring in der auf dem Publisher-Laptop geöffneten Mappe. Der
+  Publisher liest diesen geöffneten Stand auch ohne neuen Speicherstand der Datei. Dafür muss die Mappe auf dem
+  Publisher-Laptop in Excel Desktop geöffnet bleiben (Berechnung automatisch). Meldung im Protokoll:
+  `Excel-Stand geändert … über eine Kopie gelesen`. Gemessen mit einer ungespeicherten Desktop-Eingabe: rund 7 s
+  bis zur App; die Dauer über Excel Online selbst ist noch nicht gemessen.
 - **Excel Desktop: nach einer Eingabe Ctrl+S drücken.** AutoSpeichern schreibt die Datei sonst erst nach bis zu
   rund 1,5 Minuten. Mit Ctrl+S ist sie sofort gespeichert und das Resultat nach rund 7 s öffentlich sichtbar.
   AutoSpeichern bleibt eingeschaltet.
