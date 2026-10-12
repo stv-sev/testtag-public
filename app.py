@@ -10,7 +10,9 @@ Adressen:
 - `?t=<uuid>`: ältere Links mit der Testtag-UUID werden weiterhin aufgelöst und auf den Slug umgestellt.
 
 Ein Testtag zeigt beide Programme (AK5–AK9+, AK9–AK12) in vier Bereichen: Live, Ranglisten, Startliste,
-Zeitplan. Nur Testtage mit Status `live` aktualisieren sich etwa alle 10 Sekunden (`st.fragment`). Jeder
+Zeitplan. Nur Testtage mit Status `live` aktualisieren sich etwa alle 5 Sekunden (`st.fragment`): je Takt eine
+kleine Abfrage von `testtage.stand_am`; die Zeilen werden nur bei einer Änderung und spätestens alle 60 Sekunden
+vollständig neu geladen (der Publisher setzt `stand_am` erst nach allen Zeilen). Jeder
 Ladevorgang wird vollständig geprüft; bei einem Fehler bleibt der letzte gültige Stand sichtbar. Archivierte
 Testtage zeigen ausschliesslich ihren unveränderlichen Snapshot (`archiv_snapshots`, einmal je Sitzung geladen).
 
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import html
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
@@ -29,7 +32,8 @@ import streamlit as st
 
 import quelle as q
 
-TAKT = "10s"
+TAKT = "5s"
+VOLL_LADEN_SEKUNDEN = 60  # Sicherheitsnetz: vollständiges Laden spätestens nach dieser Zeit
 ALLE = "Alle"
 MAX_LIVE = 300
 LOGO = Path(__file__).resolve().parent / "assets" / "turnsport_aargau_logo.png"
@@ -271,25 +275,48 @@ def _quelle(testtag) -> str:
     return "archiv" if testtag.status == "archiviert" else "live"
 
 
-def laden(zugang, testtag) -> None:
-    """Neuen Stand vollständig laden und prüfen; nur bei Erfolg atomar ersetzen (inkl. Herkunft Live/Archiv)."""
+def laden(zugang, testtag, stand_am: str | None = None) -> None:
+    """Neuen Stand vollständig laden und prüfen; nur bei Erfolg atomar ersetzen (inkl. Herkunft Live/Archiv).
+
+    `stand_am` ist der vor dem Laden beobachtete `testtage.stand_am`; die Zeilen sind mindestens so neu."""
     stand_key, fehler_key = _schluessel(testtag)
     try:
-        st.session_state[stand_key] = q.lade_stand(zugang, testtag)
+        stand = q.lade_stand(zugang, testtag)
+        st.session_state[stand_key] = stand
         st.session_state[f"quelle|{testtag.id}"] = _quelle(testtag)
+        st.session_state[f"standam|{testtag.id}"] = stand_am
+        st.session_state[f"geprueft|{testtag.id}"] = stand.geladen_am
         st.session_state[fehler_key] = None
     except q.QuellenFehler as fehler:
         st.session_state[fehler_key] = fehler.code
 
 
-def muss_laden(testtag) -> bool:
-    """Live: bei jedem Takt. Archiv/vorbereitet: bis einmal ein Stand aus der passenden Quelle gültig geladen ist."""
-    return testtag.status == "live" or st.session_state.get(f"quelle|{testtag.id}") != _quelle(testtag)
+def muss_laden(zugang, testtag) -> tuple[bool, str | None]:
+    """(vollständig laden?, beobachteter stand_am).
+
+    Archiv/vorbereitet: bis einmal ein Stand aus der passenden Quelle gültig geladen ist. Live: je Takt nur die kleine
+    Abfrage des Testtags; vollständig geladen wird bei geändertem `stand_am`, ohne gültigen Stand, nach einem Fehler
+    (bis er behoben ist), bei einem Fehler der Abfrage und spätestens nach `VOLL_LADEN_SEKUNDEN`."""
+    stand_key, fehler_key = _schluessel(testtag)
+    passend = st.session_state.get(f"quelle|{testtag.id}") == _quelle(testtag)
+    if testtag.status != "live":
+        return not passend, None
+    try:
+        aktuell = q.finde_testtag(zugang, testtag.slug)
+    except q.QuellenFehler:
+        return True, None
+    neu = aktuell.stand_am if aktuell else None
+    stand = st.session_state.get(stand_key)
+    jetzt = datetime.now(timezone.utc)
+    if not passend or neu is None or stand is None or st.session_state.get(fehler_key)             or neu != st.session_state.get(f"standam|{testtag.id}")             or (jetzt - stand.geladen_am).total_seconds() >= VOLL_LADEN_SEKUNDEN:
+        return True, neu
+    st.session_state[f"geprueft|{testtag.id}"] = jetzt
+    return False, neu
 
 
 def status_text(status: str) -> tuple[str, str]:
     if status == "live":
-        return "Live", "wird etwa alle 10 Sekunden aktualisiert"
+        return "Live", "wird etwa alle 5 Sekunden aktualisiert"
     if status == "archiviert":
         return "Archiv", "abgeschlossener Testtag, keine Aktualisierung"
     return "Vorbereitet", "noch nicht gestartet"
@@ -298,8 +325,9 @@ def status_text(status: str) -> tuple[str, str]:
 def _stand_zeile(testtag, stand, fehler) -> None:
     zeitpunkte = [d.stand_am for d in stand.saetze]
     veroeffentlicht = max(zeitpunkte, key=q.zeit) if zeitpunkte else testtag.stand_am
-    _html([f"<div class='tt-stand'>Datenstand {_h(q.zeit_text(veroeffentlicht, mit_datum=True))} · geladen "
-           f"{q.nach_zuerich(stand.geladen_am).strftime('%H:%M:%S')}</div>"])
+    geprueft = st.session_state.get(f"geprueft|{testtag.id}") or stand.geladen_am
+    _html([f"<div class='tt-stand'>Datenstand {_h(q.zeit_text(veroeffentlicht, mit_datum=True))} · geprüft "
+           f"{q.nach_zuerich(max(geprueft, stand.geladen_am)).strftime('%H:%M:%S')}</div>"])
     if fehler:
         st.warning(f"{VERALTET} (Stand {q.nach_zuerich(stand.geladen_am).strftime('%H:%M:%S')}).")
 
@@ -504,8 +532,9 @@ ANSICHTEN = {q.LIVE: _live, q.RANGLISTE: _ranglisten, q.STARTLISTE: _startliste,
 def testtag_ansicht(zugang, testtag) -> None:
     """Lädt (Live: bei jedem Takt) und zeichnet den Testtag aus dem letzten gültigen Stand."""
     stand_key, fehler_key = _schluessel(testtag)
-    if muss_laden(testtag):
-        laden(zugang, testtag)
+    noetig, stand_am = muss_laden(zugang, testtag)
+    if noetig:
+        laden(zugang, testtag, stand_am)
     stand = st.session_state.get(stand_key)
     fehler = st.session_state.get(fehler_key)
     if stand is None:

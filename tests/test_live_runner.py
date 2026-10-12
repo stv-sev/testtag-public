@@ -120,13 +120,38 @@ class ChangeDetectionTests(Base):
         self.assertIn("AK5-AK9+: Änderung erkannt – Datei noch in Bearbeitung, warte auf stabilen Speicherstand",
                       self.logs)
 
-    def test_change_of_one_file_reads_both_together(self):
+    def test_change_of_one_file_reads_only_that_file(self):
         runner = self.started()
         reads = len(self.reads)
         self.write(AK9, scores={**AK9_SCORES, (3, "Sprung", 1): (5, 1, 5), (3, "Sprung", 3): (6, 1, 6)})
         self.assertEqual(self.ticks(runner, 2), ["in_bearbeitung", "publiziert"])
-        self.assertEqual(self.reads[reads:], [self.paths[AK5], self.paths[AK9]])
-        self.assertTrue(any(line.startswith("Datei stabil: AK9-AK12 –") for line in self.logs))
+        self.assertEqual(self.reads[reads:], [self.paths[AK9]])  # unveränderte Mappe nicht erneut gelesen
+        self.assertIn("Datei stabil: AK9-AK12 – gelesen wird AK9-AK12; unveränderte Arbeitsmappe nicht erneut "
+                      "gelesen", self.logs)
+        restarted = self.runner()  # frisches Lesen beider Mappen ergibt denselben öffentlichen Stand
+        before = len(self.api.calls)
+        self.assertEqual(self.ticks(restarted, 2), ["in_bearbeitung", "unveraendert"])
+        self.assertEqual(self.writes(before), [])
+
+    def test_unchanged_files_are_never_reread_while_other_changes(self):
+        runner = self.started()
+        reads = len(self.reads)
+        for punkte in (5, 6, 7):
+            self.write(AK5, scores={**AK5_SCORES, (2, "Pferd", 1): (punkte, 1, punkte)})
+            self.ticks(runner, 2)
+        self.assertEqual(self.reads[reads:], [self.paths[AK5]] * 3)
+
+    def test_short_poll_waits_two_seconds_of_stability(self):
+        runner = self.runner()
+        runner.poll = 1
+        runner.stable_ticks = lr.Runner(self.config, self.paths, confirm_slug=TT_SLUG, poll=1, log=print).stable_ticks
+        self.assertEqual(runner.stable_ticks, 3)  # Takt 1 s: Datei mindestens 2 s unverändert
+        self.assertEqual(self.ticks(runner, 3), ["in_bearbeitung", "in_bearbeitung", "publiziert"])
+        self.write(AK5, scores={**AK5_SCORES, (2, "Pferd", 1): (5, 1, 5)})
+        self.assertEqual(runner.tick(), "in_bearbeitung")
+        self.touch(AK5)  # Speichern/Synchronisation läuft noch: Stabilität beginnt neu
+        self.assertEqual(self.ticks(runner, 3), ["in_bearbeitung", "in_bearbeitung", "publiziert"])
+        self.assertEqual(lr.Runner(self.config, self.paths, confirm_slug=TT_SLUG, poll=5, log=print).stable_ticks, 2)
 
     def test_simultaneous_changes_give_one_combined_publication(self):
         runner = self.started()
@@ -488,7 +513,7 @@ class MainTests(Base):
 
     def test_usage_and_configuration_errors_stop_before_network(self):
         self.assertEqual(self.main()[0], 2)  # --confirm-slug fehlt
-        self.assertEqual(self.main("--confirm-slug", TT_SLUG, environ=self.environ(TESTTAG_POLL_SECONDS="1"))[0], 5)
+        self.assertEqual(self.main("--confirm-slug", TT_SLUG, environ=self.environ(TESTTAG_POLL_SECONDS="0"))[0], 5)
         environ = self.environ()
         del environ["TESTTAG_WORKBOOK_AK9_AK12"]
         code, _out, err = self.main("--confirm-slug", TT_SLUG, environ=environ)

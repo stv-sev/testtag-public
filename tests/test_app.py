@@ -128,7 +128,7 @@ class AppTests(unittest.TestCase):
         self.assert_clean(at)
 
     def test_uniform_header_logo_status_and_footer_in_every_view(self):
-        for kennung, badge in ((None, None), (TT_SLUG, "Live – wird etwa alle 10 Sekunden aktualisiert"),
+        for kennung, badge in ((None, None), (TT_SLUG, "Live – wird etwa alle 5 Sekunden aktualisiert"),
                                (ARCHIV_SLUG, "Archiv – abgeschlossener Testtag, keine Aktualisierung"),
                                ("synth-testtag-2027", "Vorbereitet – noch nicht gestartet")):
             with self.subTest(kennung=kennung):
@@ -295,6 +295,42 @@ class AppTests(unittest.TestCase):
         at.run()
         self.assertEqual([w.value for w in at.warning], [])
 
+    def _zeilen_abrufe(self) -> int:
+        return sum("/veroeffentlichung?" in c["url"] for c in self.api.calls)
+
+    def test_live_reloads_rows_only_when_stand_am_changes(self):
+        at = self.app(TT_SLUG)
+        geladen = self._zeilen_abrufe()
+        self.assertEqual(geladen, 1)
+        for _ in range(3):  # Takte ohne neue Publikation: nur die kleine Testtag-Abfrage
+            at.run()
+        self.assertEqual(self._zeilen_abrufe(), geladen)
+        self.assertIn("geprüft", self.text(at))
+        live = next(t for t in self.api.testtage if t["id"] == LIVE_ID)
+        live["stand_am"] = "2026-10-09T09:15:00+00:00"  # Publisher setzt stand_am nach allen Zeilen
+        at.run()
+        self.assertEqual(self._zeilen_abrufe(), geladen + 1)
+        at.run()
+        self.assertEqual(self._zeilen_abrufe(), geladen + 1)
+        self.assert_clean(at)
+
+    def test_live_full_reload_at_least_every_60_seconds(self):
+        import dataclasses
+        from datetime import timedelta
+        at = self.app(TT_SLUG)
+        geladen = self._zeilen_abrufe()
+        key = f"stand|{LIVE_ID}"
+        stand = at.session_state[key]
+        at.session_state[key] = dataclasses.replace(stand, geladen_am=stand.geladen_am - timedelta(seconds=61))
+        at.run()
+        self.assertEqual(self._zeilen_abrufe(), geladen + 1)  # Sicherheitsnetz trotz gleichem stand_am
+
+    def test_archive_and_prepared_testtag_are_not_polled(self):
+        at = self.app(ARCHIV_SLUG)
+        abrufe = len(self.api.calls)
+        at.run()
+        self.assertEqual(sum("/archiv_snapshots?" in c["url"] for c in self.api.calls[abrufe:]), 0)
+
     def test_first_load_error_shows_no_seemingly_valid_ranking(self):
         self.api.manipulieren = lambda rows: rows + [rows[0]]  # doppelter Primärschlüssel
         at = self.app(TT_SLUG)
@@ -307,7 +343,7 @@ class AppTests(unittest.TestCase):
     def test_archive_is_not_refreshed_automatically(self):
         self.assertIsNone(__import__("app").takt_fuer("archiviert"))
         self.assertIsNone(__import__("app").takt_fuer("vorbereitet"))
-        self.assertEqual(__import__("app").takt_fuer("live"), "10s")
+        self.assertEqual(__import__("app").takt_fuer("live"), "5s")
         at = self.app(ARCHIV_SLUG)
         self.assertIn("Archiv – abgeschlossener Testtag, keine Aktualisierung", klartext(self.kopf(at)))
         self.assertIn("tt-badge archiv", self.kopf(at))
@@ -316,11 +352,11 @@ class AppTests(unittest.TestCase):
         at.run()
         self.go(at, q.RANGLISTE)
         self.assertEqual(archiv_loads(), 1)  # kein erneutes Laden
-        loads = lambda: sum("/veroeffentlichung?" in c["url"] for c in self.api.calls)  # noqa: E731
+        pruefungen = lambda: sum("/testtage?" in c["url"] for c in self.api.calls)  # noqa: E731
         live = self.app(TT_SLUG)
-        before = loads()
+        before = pruefungen()
         live.run()
-        self.assertGreater(loads(), before)
+        self.assertGreater(pruefungen(), before)  # Live prüft bei jedem Takt den Stand
 
     # ── Archiv (P1F) ──
     def test_archive_is_shown_only_from_snapshot(self):

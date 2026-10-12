@@ -57,10 +57,10 @@ class ParserTests(unittest.TestCase):
             self.assertNotIn("sb_secret", str(ctx.exception))
 
     def test_poll_seconds_range(self):
-        self.assertEqual(lc.poll_seconds({}), 5)
-        for good in ("2", "60", "15"):
+        self.assertEqual(lc.poll_seconds({}), 1)
+        for good in ("1", "2", "60", "15"):
             self.assertEqual(lc.poll_seconds({"TESTTAG_POLL_SECONDS": good}), int(good))
-        for bad in ("1", "61", "5.5", "-3", "abc", "0x10", "999"):
+        for bad in ("0", "61", "5.5", "-3", "abc", "0x10", "999"):
             with self.subTest(bad=bad), self.assertRaises(lc.LocalConfigError):
                 lc.poll_seconds({"TESTTAG_POLL_SECONDS": bad})
 
@@ -159,7 +159,7 @@ class EnsureEnvTests(unittest.TestCase):
         self.assertEqual(values["SUPABASE_SECRET_KEY"], TEST_SECRET_KEY)
         self.assertEqual(values["TESTTAG_WORKBOOK_AK5_AK9PLUS"], str(book))
         self.assertNotIn("TESTTAG_WORKBOOK_AK9_AK12", values)
-        self.assertEqual(values["TESTTAG_POLL_SECONDS"], "5")
+        self.assertEqual(values["TESTTAG_POLL_SECONDS"], "1")
 
 
 @unittest.skipIf(shutil.which("git") is None or not (ROOT / ".git").exists(), "Git-Ablage nicht verfügbar")

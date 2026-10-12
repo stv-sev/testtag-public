@@ -61,7 +61,8 @@ Excel Desktop oder Excel Online
 ```
 
 - Der Slug muss exakt `Public!B2` beider Mappen entsprechen, sonst wird nichts publiziert.
-- Nach rund 10 Sekunden erscheint `Publikation bestätigt` oder `Abgleich bestätigt`.
+- Nach wenigen Sekunden erscheint `Publikation bestätigt` oder `Abgleich bestätigt`.
+- In `.env` sollte `TESTTAG_POLL_SECONDS=1` stehen. Mit `5` dauert jede Publikation rund 5–10 s länger.
 - Das Fenster offen lassen. Der Laptop darf nicht in den Ruhezustand gehen.
 - Ein zweiter Start für dieselben Mappen wird abgewiesen (`läuft bereits`).
 
@@ -70,7 +71,7 @@ Excel Desktop oder Excel Online
 | Meldung | Bedeutung |
 |---|---|
 | `Änderung erkannt – Datei noch in Bearbeitung` | Excel speichert oder OneDrive synchronisiert noch. Es wird gewartet. |
-| `Datei stabil … gemeinsam gelesen` | Beide Mappen werden jetzt gelesen. |
+| `Datei stabil … gelesen wird …` | Die geänderte Mappe wird gelesen. Eine unveränderte Mappe wird nicht erneut gelesen. |
 | `Publikation bestätigt: n Zeilen geändert …` | Öffentlich ist der neue Stand, geprüft durch Rücklesen. |
 | `Abgleich bestätigt … keine Schreibanfrage` | Der öffentliche Stand ist schon aktuell. |
 | `Inhalt unverändert (nur Speicherzeitpunkt)` | Gespeichert ohne Inhaltsänderung. Es wird nichts gesendet. |
@@ -79,8 +80,11 @@ Excel Desktop oder Excel Online
 | `Validierung fehlgeschlagen (CODE)` | Ein Eingabefehler in Excel. Der alte Stand bleibt, siehe Fehlerfall. |
 | `Archivstatus: Testtag archiviert` | Der Testtag ist abgeschlossen. Es wird nichts mehr publiziert. |
 
-- **Excel offen lassen:** Die Mappen nicht zwischen den Eingaben schliessen. AutoSpeichern speichert nach wenigen
-  Sekunden bis rund einer Minute. Der Publisher wartet, bis die Datei stabil ist, und publiziert dann automatisch.
+- **Excel offen lassen:** Die Mappen nicht zwischen den Eingaben schliessen. Der Publisher wartet, bis die Datei
+  stabil ist, und publiziert dann automatisch.
+- **Excel Desktop: nach einer Eingabe Ctrl+S drücken.** AutoSpeichern schreibt die Datei sonst erst nach bis zu
+  rund 1,5 Minuten. Mit Ctrl+S ist sie sofort gespeichert und das Resultat nach rund 7 s öffentlich sichtbar.
+  AutoSpeichern bleibt eingeschaltet.
 - **OneDrive-Status:** Grün bedeutet synchron. „Upload ausstehend“ bei einer in Excel Desktop geöffneten Mappe ist
   normal, Excel lädt selbst hoch.
 - **Netzwerkunterbruch:** Nichts tun. Nach der Wiederverbindung wird der letzte Stand automatisch nachpubliziert.

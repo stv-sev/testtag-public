@@ -3,12 +3,14 @@
     python -B -m testtag_public.live_runner --confirm-slug <Event-Slug>   # Dauerbetrieb (Ctrl+C beendet)
     python -B -m testtag_public.live_runner --check                       # einmal prüfen, ohne Netzwerk
 
-Ablauf je Takt (`TESTTAG_POLL_SECONDS`, Standard 5 s, zulässig 2–60):
+Ablauf je Takt (`TESTTAG_POLL_SECONDS`, Standard 1 s, zulässig 1–60):
 
 1. Grösse und Änderungszeit beider Dateien erfassen (günstiger Hinweis, kein Lesen des Inhalts).
 2. Entspricht der kombinierte Stand dem zuletzt erfolgreich publizierten: nichts tun.
-3. Sonst warten, bis jede Datei in zwei aufeinanderfolgenden Takten unverändert ist.
-4. Beide Arbeitsmappen gemeinsam über die sicheren temporären Kopien lesen und validieren.
+3. Sonst warten, bis jede Datei mindestens `STABIL_SEKUNDEN` (2 s) und in mindestens zwei aufeinanderfolgenden
+   Takten unverändert ist.
+4. Nur geänderte Arbeitsmappen über die sicheren temporären Kopien lesen; eine unveränderte Mappe (gleiche Grösse
+   und Änderungszeit wie beim letzten erfolgreichen Lesen) wird nicht erneut gelesen. Beide gemeinsam validieren.
 5. Identischer Inhalt (SHA-256) wie zuletzt publiziert: keine Anfrage (z. B. Speichern ohne Änderung).
 6. Sonst P1C-Publikation (`database_publisher.publish`): nur geänderte Zeilen, öffentliches Rücklesen.
 7. Erst nach Erfolg gilt der kombinierte Stand als verarbeitet.
@@ -31,6 +33,7 @@ import hashlib
 import json
 import logging
 import logging.handlers
+import math
 import os
 import sys
 import threading
@@ -55,6 +58,7 @@ LOG_NAME = "live_runner.log"
 LOG_BYTES = 256 * 1024
 LOG_BACKUPS = 3
 MAX_BACKOFF = 60
+STABIL_SEKUNDEN = 2  # Mindestdauer ohne Änderung von Grösse/Änderungszeit vor dem Lesen
 LOCK_EXIT = 10
 SLUG_ABWEICHUNG = "SLUG_ABWEICHUNG"
 
@@ -209,6 +213,8 @@ class Runner:
         self.now, self.monotonic, self.read, self.publish = now, monotonic, read, publish
         self.last_stat: dict[str, object] = {p: None for p in PROGRAMME}
         self.stable = {p: 0 for p in PROGRAMME}
+        self.stable_ticks = max(2, math.ceil(STABIL_SEKUNDEN / poll) + 1)  # Takt 1 s: 3 Beobachtungen über 2 s
+        self.gelesen: dict[str, tuple] = {}  # Programm -> (Dateistand, zuletzt erfolgreich gelesene Quelle)
         self.verarbeitet: Optional[Verarbeitet] = None
         self.failures = 0
         self.retry_at: Optional[float] = None
@@ -261,7 +267,7 @@ class Runner:
                 self._note((combined, program, "fehler"),
                            f"{program}: Datei nicht verfügbar ({self._clean(stats[program][1])}) – neuer Versuch")
                 return "datei_fehler"
-        unstable = [p for p in PROGRAMME if self.stable[p] < 2]
+        unstable = [p for p in PROGRAMME if self.stable[p] < self.stable_ticks]
         if unstable:
             for program in unstable:
                 self._note((combined, program, "aenderung"), f"{program}: Änderung erkannt – Datei noch in "
@@ -276,9 +282,12 @@ class Runner:
     def _process(self, combined: tuple) -> str:
         changed = [p for i, p in enumerate(PROGRAMME)
                    if self.verarbeitet is None or self.verarbeitet.stats[i] != combined[i]]
-        self.log(f"Datei stabil: {', '.join(changed)} – beide Arbeitsmappen werden gemeinsam gelesen")
+        lesen = [p for i, p in enumerate(PROGRAMME) if self.gelesen.get(p, (None,))[0] != combined[i]]
+        self.log(f"Datei stabil: {', '.join(changed)} – gelesen wird {', '.join(lesen)}"
+                 + ("" if len(lesen) == len(PROGRAMME) else "; unveränderte Arbeitsmappe nicht erneut gelesen"))
         try:
-            sources = [self.read(self.paths[p], wait_seconds=0, sleep=lambda _s: None) for p in PROGRAMME]
+            sources = [self.read(self.paths[p], wait_seconds=0, sleep=lambda _s: None) if p in lesen
+                       else self.gelesen[p][1] for p in PROGRAMME]
             for source, program in zip(sources, PROGRAMME):
                 _check_program(source, program, OPTIONEN[program])
             if {s.public.get("event_id") for s in sources} != {self.slug}:
@@ -287,6 +296,7 @@ class Runner:
             return self._retry("Dateifehler", str(exc), combined)
         except PublicationError as exc:
             return self._invalid(exc, combined)
+        self.gelesen = {p: (combined[i], sources[i]) for i, p in enumerate(PROGRAMME)}
         shas = tuple(s.source.sha256 for s in sources)
         if self.verarbeitet is not None and shas == self.verarbeitet.shas:
             self._done(combined, shas)

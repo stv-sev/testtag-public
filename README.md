@@ -48,7 +48,7 @@ SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 SUPABASE_SECRET_KEY=sb_secret_...
 TESTTAG_WORKBOOK_AK5_AK9PLUS="<absoluter lokaler Pfad>"
 TESTTAG_WORKBOOK_AK9_AK12="<absoluter lokaler Pfad>"
-TESTTAG_POLL_SECONDS=5
+TESTTAG_POLL_SECONDS=1
 ```
 
 - `.env` und `.env.*` sind durch `.gitignore` ausgeschlossen. Schlüssel nie in Tickets, Chats oder
@@ -58,7 +58,8 @@ TESTTAG_POLL_SECONDS=5
   Meldung nennt nur Zeile und Variablenname.
 - Werte mit Leerzeichen gehören in `"…"`, Inhalte werden wörtlich übernommen. Es gibt keine Variablenersetzung
   und keine mehrzeiligen Werte. Gelesen wird nur mit der Standardbibliothek (`testtag_public.local_config`).
-- `TESTTAG_POLL_SECONDS`: ganze Zahl von 2 bis 60, Standard 5.
+- `TESTTAG_POLL_SECONDS`: ganze Zahl von 1 bis 60, Standard 1. Eine bestehende `.env` mit `5` verzögert jede
+  Publikation um bis zu rund 10 s und sollte auf `1` gesetzt werden.
 - Einmalige Anlage aus der aktuellen Prozessumgebung:
   `python -B -m testtag_public.local_config --init`.
   - Das geschieht nur, wenn `.env` fehlt und `git check-ignore` den Ausschluss bestätigt.
@@ -335,8 +336,11 @@ dem Projektstamm und auf Streamlit Community Cloud.
   Startposition. Leere Gruppen entfallen.
 - **Zeitplan:** ein gemeinsamer Tagesablauf, AK5–AK9+ vor AK9–AK12, in der Reihenfolge des Publishers.
 
-Nur Testtage mit Status `live` aktualisieren sich etwa alle 10 Sekunden (`st.fragment(run_every="10s")`, keine
-neue Abhängigkeit). Vorbereitete und archivierte Testtage werden je Sitzung einmal geladen.
+Nur Testtage mit Status `live` aktualisieren sich etwa alle 5 Sekunden (`st.fragment(run_every="5s")`, keine
+neue Abhängigkeit). Je Takt wird nur `testtage.stand_am` abgefragt (wenige Bytes). Alle Zeilen werden nur neu
+geladen, wenn sich `stand_am` geändert hat, solange ein Ladefehler besteht und spätestens alle 60 Sekunden. Der
+Publisher setzt `stand_am` erst, nachdem alle Zeilen geschrieben und geprüft sind. Vorbereitete und archivierte
+Testtage werden je Sitzung einmal geladen.
 
 Archivierte Testtage zeigen ausschliesslich ihren Snapshot aus `archiv_snapshots` (P1F, siehe unten).
 
@@ -359,10 +363,11 @@ entsprechen, sonst publiziert der Dauerbetrieb nichts.
 Ablauf je Takt (`TESTTAG_POLL_SECONDS`):
 
 1. Nur Grösse und Änderungszeit beider Dateien prüfen. Ist der Stand schon verarbeitet, passiert nichts.
-2. Bei einer Änderung warten, bis jede Datei in zwei aufeinanderfolgenden Takten unverändert ist. Die Mappen dürfen
-   in Excel geöffnet sein. Excel-Sperrdateien (`~$…`) spielen keine Rolle (P1I).
-3. Beide Mappen gemeinsam über die sicheren temporären Kopien lesen und validieren, nie gemischt. Der Slug muss
-   dem bestätigten entsprechen.
+2. Bei einer Änderung warten, bis jede Datei mindestens 2 s und in mindestens zwei aufeinanderfolgenden Takten
+   unverändert ist. Die Mappen dürfen in Excel geöffnet sein. Excel-Sperrdateien (`~$…`) spielen keine Rolle (P1I).
+3. Nur geänderte Mappen über die sicheren temporären Kopien lesen. Eine Mappe mit gleicher Grösse und Änderungszeit
+   wie beim letzten erfolgreichen Lesen wird nicht erneut gelesen. Beide gemeinsam validieren; der Slug muss dem
+   bestätigten entsprechen. Nach einem Neustart werden beide gelesen.
 4. Hat sich der Inhalt (SHA-256) nicht geändert, wird keine Anfrage gesendet. Sonst folgt eine P1C-Publikation: nur
    geänderte Zeilen, öffentliches Rücklesen, gleiche Regeln für Korrektur, Rotationsgrenze und Sperre.
 5. Erst nach Erfolg gilt der kombinierte Stand als verarbeitet.
