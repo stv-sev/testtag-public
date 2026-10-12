@@ -10,9 +10,15 @@ Adressen:
 - `?t=<uuid>`: ältere Links mit der Testtag-UUID werden weiterhin aufgelöst und auf den Slug umgestellt.
 
 Ein Testtag zeigt beide Programme (AK5–AK9+, AK9–AK12) in vier Bereichen: Live, Ranglisten, Startliste,
-Zeitplan. Nur Testtage mit Status `live` aktualisieren sich etwa alle 5 Sekunden (`st.fragment`): je Takt eine
-kleine Abfrage von `testtage.stand_am`; die Zeilen werden nur bei einer Änderung und spätestens alle 60 Sekunden
-vollständig neu geladen (der Publisher setzt `stand_am` erst nach allen Zeilen). Jeder
+Zeitplan. Nur Testtage mit Status `live` aktualisieren sich etwa alle 5 Sekunden (`st.fragment`).
+
+Lesezugriffe werden zwischen allen Zuschauern geteilt (`st.cache_data`, sitzungsübergreifend):
+- die kleine Abfrage des Testtags (`stand_am`, Status, Sichtbarkeit) für `PRUEF_TTL` Sekunden;
+- der vollständig geprüfte Datenstand je Testtag, Status und `stand_am`. Der Publisher setzt `stand_am` erst nach
+  allen Zeilen; ein neuer `stand_am` ergibt daher einen neuen Eintrag. Spätestens nach `KONTROLLE_SEKUNDEN` lädt
+  ein Zuschauer für alle neu (gemeinsame Kontrollladung, falls Zeilen ohne neuen `stand_am` geändert wurden).
+Fehler werden nie zwischengespeichert. Ein verborgener Testtag wird nicht weiter angezeigt, auch nicht aus dem
+Cache oder dem Sitzungsstand. Jeder
 Ladevorgang wird vollständig geprüft; bei einem Fehler bleibt der letzte gültige Stand sichtbar. Archivierte
 Testtage zeigen ausschliesslich ihren unveränderlichen Snapshot (`archiv_snapshots`, einmal je Sitzung geladen).
 
@@ -24,6 +30,7 @@ from __future__ import annotations
 
 import base64
 import html
+import time
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -33,13 +40,15 @@ import streamlit as st
 import quelle as q
 
 TAKT = "5s"
-VOLL_LADEN_SEKUNDEN = 60  # Sicherheitsnetz: vollständiges Laden spätestens nach dieser Zeit
+PRUEF_TTL = 3  # s: kleine Änderungsabfrage, für alle Zuschauer gemeinsam
+KONTROLLE_SEKUNDEN = 300  # s: gemeinsame Kontrollladung eines unveränderten Stands
 ALLE = "Alle"
 MAX_LIVE = 300
 LOGO = Path(__file__).resolve().parent / "assets" / "turnsport_aargau_logo.png"
 ROBOTS = '<meta name="robots" content="noindex, nofollow">'
 NICHT_VERFUEGBAR = "Die Daten dieses Testtags sind zurzeit nicht verfügbar. Bitte später erneut versuchen."
 VERALTET = "Aktualisierung vorübergehend nicht möglich – letzter gültiger Stand wird angezeigt"
+WARTET = "Die Daten sind zurzeit nicht erreichbar. Die Seite versucht es automatisch erneut."
 NAV_TEXT = {q.LIVE: "⚡ Live", q.RANGLISTE: "🏅 Ranglisten", q.STARTLISTE: "📋 Startliste", q.ZEITPLAN: "🕐 Zeitplan"}
 STATUS_BADGE = {"live": ("live", "LIVE"), "vorbereitet": ("demnaechst", "Demnächst"), "archiviert": ("archiv", "Archiv")}
 RANG_FARBE = {1: "#FFD700", 2: "#C0C0C0", 3: "#CD7F32"}
@@ -223,6 +232,17 @@ def fuss() -> None:
            "enthalten.<br>Turnsport Aargau · Testtag</div>"])
 
 
+def _warten(versuch) -> None:
+    """Seitenaufruf während eines Ausfalls: im Takt erneut versuchen (gebremst über alle Zuschauer, `quelle.AUSFALL`)
+    und nach der Wiederherstellung die ganze Seite neu aufbauen – ohne Neuladen durch den Zuschauer."""
+    try:
+        versuch()
+    except q.QuellenFehler:
+        st.info(WARTET)
+        return
+    st.rerun(scope="app")
+
+
 def _zugang():
     try:
         return q.lade_zugang(st.secrets)
@@ -248,7 +268,7 @@ def uebersicht(zugang) -> None:
     try:
         testtage = q.lade_testtage(zugang)
     except q.QuellenFehler:
-        st.warning("Die Testtage sind zurzeit nicht verfügbar. Bitte später erneut versuchen.")
+        st.fragment(run_every=TAKT)(_warten)(lambda: q.lade_testtage(zugang))
         return
     if not testtage:
         leer("Zurzeit ist kein Testtag veröffentlicht.")
@@ -275,43 +295,80 @@ def _quelle(testtag) -> str:
     return "archiv" if testtag.status == "archiviert" else "live"
 
 
-def laden(zugang, testtag, stand_am: str | None = None) -> None:
-    """Neuen Stand vollständig laden und prüfen; nur bei Erfolg atomar ersetzen (inkl. Herkunft Live/Archiv).
+def _fenster(sekunden: int) -> int:
+    """Zeitfenster für gemeinsame Cache-Einträge: innerhalb eines Fensters teilen alle Zuschauer einen Abruf."""
+    return int(time.time() // sekunden)
 
-    `stand_am` ist der vor dem Laden beobachtete `testtage.stand_am`; die Zeilen sind mindestens so neu."""
+
+@st.cache_data(ttl=2 * PRUEF_TTL, max_entries=100, show_spinner=False)
+def _testtag_gemeinsam(basis: str, kennung: str, fenster: int, _zugang) -> "q.Testtag | None":
+    """Kleine Abfrage des öffentlichen Testtags, für alle Zuschauer gemeinsam (None: unbekannt oder verborgen)."""
+    return q.finde_testtag(_zugang, kennung)
+
+
+@st.cache_data(ttl=2 * KONTROLLE_SEKUNDEN, max_entries=20, show_spinner=False)
+def _stand_gemeinsam(basis: str, testtag_id: str, slug: str, titel: str, status: str, stand_am: str, fenster: int,
+                     _zugang):
+    """Vollständig geprüfter Datenstand je Testtag, Status und `stand_am`, für alle Zuschauer gemeinsam."""
+    return q.lade_stand(_zugang, q.Testtag(testtag_id, slug, titel, status, stand_am))
+
+
+def finde(zugang, kennung: str):
+    return _testtag_gemeinsam(zugang.url, kennung, _fenster(PRUEF_TTL), zugang)
+
+
+def laden(zugang, testtag) -> None:
+    """Stand aus dem gemeinsamen Cache oder neu laden und prüfen; nur bei Erfolg atomar ersetzen."""
     stand_key, fehler_key = _schluessel(testtag)
+    fenster = _fenster(KONTROLLE_SEKUNDEN)
     try:
-        stand = q.lade_stand(zugang, testtag)
-        st.session_state[stand_key] = stand
-        st.session_state[f"quelle|{testtag.id}"] = _quelle(testtag)
-        st.session_state[f"standam|{testtag.id}"] = stand_am
-        st.session_state[f"geprueft|{testtag.id}"] = stand.geladen_am
-        st.session_state[fehler_key] = None
+        stand = _stand_gemeinsam(zugang.url, testtag.id, testtag.slug, testtag.titel, testtag.status,
+                                 testtag.stand_am, fenster, zugang)
     except q.QuellenFehler as fehler:
         st.session_state[fehler_key] = fehler.code
+        return
+    st.session_state[stand_key] = stand
+    st.session_state[f"quelle|{testtag.id}"] = _quelle(testtag)
+    st.session_state[f"standam|{testtag.id}"] = testtag.stand_am
+    st.session_state[f"fenster|{testtag.id}"] = fenster
+    st.session_state[f"geprueft|{testtag.id}"] = datetime.now(timezone.utc)
+    st.session_state[fehler_key] = None
 
 
-def muss_laden(zugang, testtag) -> tuple[bool, str | None]:
-    """(vollständig laden?, beobachteter stand_am).
+def vergessen(testtag) -> None:
+    """Sitzungsstand eines nicht mehr öffentlichen Testtags verwerfen (nie weiter anzeigen)."""
+    for key in (*_schluessel(testtag), f"quelle|{testtag.id}", f"standam|{testtag.id}", f"geprueft|{testtag.id}",
+                f"fenster|{testtag.id}"):
+        st.session_state.pop(key, None)
 
-    Archiv/vorbereitet: bis einmal ein Stand aus der passenden Quelle gültig geladen ist. Live: je Takt nur die kleine
-    Abfrage des Testtags; vollständig geladen wird bei geändertem `stand_am`, ohne gültigen Stand, nach einem Fehler
-    (bis er behoben ist), bei einem Fehler der Abfrage und spätestens nach `VOLL_LADEN_SEKUNDEN`."""
+
+def aktualisieren(zugang, testtag) -> bool:
+    """Stand der Sitzung nachführen. False: Testtag ist nicht (mehr) öffentlich.
+
+    Archiv/vorbereitet: einmal je Sitzung aus dem gemeinsamen Cache, danach eingefroren. Live: je Takt die gemeinsame
+    kleine Abfrage; der Datenstand wird nur bei neuem `stand_am`, ohne gültigen Stand, nach einem Fehler oder in einem
+    neuen Kontrollfenster geholt – jeweils aus dem gemeinsamen Cache, wenn ihn schon ein Zuschauer geladen hat.
+    Schlägt die kleine Abfrage fehl, bleibt der letzte gültige Stand (mit Hinweis)."""
     stand_key, fehler_key = _schluessel(testtag)
-    passend = st.session_state.get(f"quelle|{testtag.id}") == _quelle(testtag)
     if testtag.status != "live":
-        return not passend, None
+        if st.session_state.get(f"quelle|{testtag.id}") != _quelle(testtag):
+            laden(zugang, testtag)
+        return True
     try:
-        aktuell = q.finde_testtag(zugang, testtag.slug)
-    except q.QuellenFehler:
-        return True, None
-    neu = aktuell.stand_am if aktuell else None
-    stand = st.session_state.get(stand_key)
-    jetzt = datetime.now(timezone.utc)
-    if not passend or neu is None or stand is None or st.session_state.get(fehler_key)             or neu != st.session_state.get(f"standam|{testtag.id}")             or (jetzt - stand.geladen_am).total_seconds() >= VOLL_LADEN_SEKUNDEN:
-        return True, neu
-    st.session_state[f"geprueft|{testtag.id}"] = jetzt
-    return False, neu
+        aktuell = finde(zugang, testtag.slug)
+    except q.QuellenFehler as fehler:
+        st.session_state[fehler_key] = fehler.code
+        return True
+    if aktuell is None or aktuell.id != testtag.id:
+        vergessen(testtag)
+        return False
+    if st.session_state.get(stand_key) is None or st.session_state.get(fehler_key) \
+            or st.session_state.get(f"quelle|{testtag.id}") != _quelle(aktuell) \
+            or st.session_state.get(f"standam|{testtag.id}") != aktuell.stand_am             or st.session_state.get(f"fenster|{testtag.id}") != _fenster(KONTROLLE_SEKUNDEN):
+        laden(zugang, aktuell)  # neuer Stand, Fehler oder gemeinsame Kontrollladung (aus dem Cache, wenn vorhanden)
+    else:
+        st.session_state[f"geprueft|{testtag.id}"] = datetime.now(timezone.utc)
+    return True
 
 
 def status_text(status: str) -> tuple[str, str]:
@@ -532,9 +589,9 @@ ANSICHTEN = {q.LIVE: _live, q.RANGLISTE: _ranglisten, q.STARTLISTE: _startliste,
 def testtag_ansicht(zugang, testtag) -> None:
     """Lädt (Live: bei jedem Takt) und zeichnet den Testtag aus dem letzten gültigen Stand."""
     stand_key, fehler_key = _schluessel(testtag)
-    noetig, stand_am = muss_laden(zugang, testtag)
-    if noetig:
-        laden(zugang, testtag, stand_am)
+    if not aktualisieren(zugang, testtag):
+        st.info("Dieser Testtag ist nicht verfügbar.")
+        return
     stand = st.session_state.get(stand_key)
     fehler = st.session_state.get(fehler_key)
     if stand is None:
@@ -560,14 +617,21 @@ def zeichne() -> None:
     st.button("← Alle Testtage", on_click=_zur_uebersicht, key="zurueck")
     merk = f"testtag|{kennung}"
     try:
-        testtag = q.finde_testtag(zugang, kennung)
-        st.session_state[merk] = testtag
+        testtag = finde(zugang, kennung)
+        if testtag is not None:
+            st.session_state[merk] = testtag
     except q.QuellenFehler as fehler:
         testtag = None if fehler.code == "KENNUNG" else st.session_state.get(merk)
         if testtag is None:
-            st.info("Dieser Testtag ist nicht verfügbar." if fehler.code == "KENNUNG" else NICHT_VERFUEGBAR)
+            if fehler.code == "KENNUNG":
+                st.info("Dieser Testtag ist nicht verfügbar.")
+            else:  # noch kein Stand in dieser Sitzung: automatisch weiter versuchen
+                st.fragment(run_every=TAKT)(_warten)(lambda: finde(zugang, kennung))
             return
-    if testtag is None:
+    if testtag is None:  # unbekannt oder verborgen: auch einen früheren Sitzungsstand nie mehr verwenden
+        frueher = st.session_state.pop(merk, None)
+        if frueher is not None:
+            vergessen(frueher)
         st.info("Dieser Testtag ist nicht verfügbar.")
         return
     if kennung != testtag.slug:  # alter UUID-Link: künftig immer mit dem Slug

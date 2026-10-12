@@ -34,6 +34,8 @@ class Base(unittest.TestCase):
         cls._tmp.cleanup()
 
     def setUp(self):
+        q.AUSFALL.zuruecksetzen()
+        self.addCleanup(q.AUSFALL.zuruecksetzen)
         self.api = FakeOeffentlich(self.data["testtage"], self.data["rows"], self.data["snapshots"])
         self.zugang = q.lade_zugang(SECRETS)
 
@@ -297,3 +299,98 @@ class AuswahlTests(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KompressionTests(unittest.TestCase):
+    """Supabase komprimiert nur auf Anfrage (Accept-Encoding: gzip)."""
+
+    def test_gzip_is_requested_and_unpacked(self):
+        import gzip as _gzip
+        roh = b'[{"a": 1}]'
+
+        class Antwort:
+            status = 200
+            headers = {"Content-Encoding": "gzip"}
+
+            def read(self):
+                return _gzip.compress(roh)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+        gesendet = {}
+
+        def oeffnen(anfrage, timeout):
+            gesendet.update(dict(anfrage.header_items()))
+            return Antwort()
+        with mock.patch("urllib.request.urlopen", oeffnen):
+            status, text = q.https_transport("https://example.supabase.co/rest/v1/testtage", {"apikey": "x"}, 5)
+        self.assertEqual((status, text), (200, roh.decode()))
+        self.assertEqual(gesendet.get("Accept-encoding"), "gzip")
+
+    def test_damaged_unknown_or_oversized_encoding_is_rejected(self):
+        import gzip as _gzip
+        self.assertEqual(q._entpacken(b"klar", ""), b"klar")
+        for roh, kodierung in ((b"kein gzip", "gzip"), (_gzip.compress(b"x")[:-6], "gzip"), (b"x", "br")):
+            with self.subTest(kodierung=kodierung), self.assertRaises(q.QuellenFehler) as ctx:
+                q._entpacken(roh, kodierung)
+            self.assertEqual(ctx.exception.code, "KODIERUNG")
+        with mock.patch.object(q, "MAX_ANTWORT_BYTES", 1000), self.assertRaises(q.QuellenFehler):
+            q._entpacken(_gzip.compress(b"0" * 5000), "gzip")
+
+
+class AusfallbremseTests(unittest.TestCase):
+    def setUp(self):
+        self.uhr = [1000.0]
+        patcher = mock.patch("time.time", new=lambda: self.uhr[0])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.bremse = q.Ausfallbremse()
+        self.aufrufe = 0
+
+    def abruf(self, code=None):
+        def f():
+            self.aufrufe += 1
+            if code:
+                raise q.QuellenFehler("weg", code)
+            return "ok"
+        return f
+
+    def test_outage_blocks_all_callers_with_growing_pause(self):
+        with self.assertRaises(q.QuellenFehler):
+            self.bremse.abrufen(self.abruf("NETZ_URLERROR"))
+        pausen = []
+        for _ in range(6):
+            for _ in range(20):  # viele Zuschauer während der Sperrzeit: keine Anfrage
+                with self.assertRaises(q.QuellenFehler) as ctx:
+                    self.bremse.abrufen(self.abruf())
+                self.assertEqual(ctx.exception.code, self.bremse.code)  # Fehler der letzten Prüfung
+            pausen.append(self.bremse.bis - self.uhr[0])
+            self.uhr[0] = self.bremse.bis
+            with self.assertRaises(q.QuellenFehler):
+                self.bremse.abrufen(self.abruf("HTTP_503"))  # genau ein Prüfabruf, weiterhin gestört
+        self.assertEqual(self.aufrufe, 7)
+        self.assertEqual(pausen, [2.0, 4.0, 8.0, 10.0, 10.0, 10.0])
+
+    def test_only_one_probe_while_others_wait_and_success_clears(self):
+        with self.assertRaises(q.QuellenFehler):
+            self.bremse.abrufen(self.abruf("ZEITUEBERSCHREITUNG"))
+        self.uhr[0] += 3
+
+        def probe():
+            with self.assertRaises(q.QuellenFehler):  # zweiter Zuschauer während des Prüfabrufs
+                self.bremse.abrufen(self.abruf())
+            return "ok"
+        self.assertEqual(self.bremse.abrufen(probe), "ok")
+        self.assertEqual(self.bremse.abrufen(self.abruf()), "ok")  # Sperre aufgehoben
+        self.assertEqual(self.aufrufe, 2)  # Ausfall + Abruf nach Aufhebung; der Wartende ohne Anfrage
+
+    def test_data_and_access_errors_do_not_block(self):
+        for code in ("PRUEFSUMME", "JSON", "HTTP_401", "HTTP_404", "FORMAT"):
+            with self.subTest(code=code), self.assertRaises(q.QuellenFehler):
+                self.bremse.abrufen(self.abruf(code))
+            self.assertIsNone(self.bremse.code)
+        self.assertEqual(self.bremse.abrufen(self.abruf()), "ok")
+

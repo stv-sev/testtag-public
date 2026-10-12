@@ -25,9 +25,12 @@ import math
 import re
 import socket
 import sys
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -155,14 +158,34 @@ def lade_zugang(secrets) -> Zugang:
     return Zugang(url, schluessel, float(zeit))
 
 
+MAX_ANTWORT_BYTES = 64 * 1024 * 1024  # Obergrenze nach dem Entpacken
+
+
+def _entpacken(roh: bytes, kodierung: str) -> bytes:
+    """gzip-Antwort entpacken (Supabase komprimiert nur auf Anfrage); begrenzt gegen übergrosse Antworten."""
+    if kodierung in ("", "identity"):
+        return roh
+    if kodierung != "gzip":
+        raise QuellenFehler("Die Daten sind zurzeit nicht lesbar.", "KODIERUNG")
+    entpacker = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    try:
+        daten = entpacker.decompress(roh, MAX_ANTWORT_BYTES)
+    except zlib.error:
+        raise QuellenFehler("Die Daten sind zurzeit nicht lesbar.", "KODIERUNG") from None
+    if entpacker.unconsumed_tail or not entpacker.eof:
+        raise QuellenFehler("Die Daten sind zurzeit nicht lesbar.", "KODIERUNG")
+    return daten
+
+
 def https_transport(url: str, kopf: dict, zeitueberschreitung: float):
-    """Vorgabetransport: genau ein lesender HTTPS-Aufruf mit fester Zeitüberschreitung."""
+    """Vorgabetransport: genau ein lesender HTTPS-Aufruf mit fester Zeitüberschreitung, gzip-komprimiert."""
     if not url.startswith("https://"):
         raise QuellenFehler("Nur HTTPS ist zulässig.", "ADRESSE")
-    anfrage = urllib.request.Request(url, headers=kopf, method="GET")
+    anfrage = urllib.request.Request(url, headers={**kopf, "Accept-Encoding": "gzip"}, method="GET")
     try:
         with urllib.request.urlopen(anfrage, timeout=zeitueberschreitung) as antwort:
-            return antwort.status, antwort.read().decode("utf-8", "replace")
+            kodierung = (antwort.headers.get("Content-Encoding") or "").strip().lower()
+            return antwort.status, _entpacken(antwort.read(), kodierung).decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         try:
             return e.code, ""  # Fehlerantworten werden nie ausgewertet oder angezeigt
@@ -185,18 +208,71 @@ def _url(zugang: Zugang, tabelle: str, parameter: list[tuple[str, str]]) -> str:
     return f"{zugang.url}/rest/v1/{urllib.parse.quote(tabelle, safe='')}?{abfrage}"
 
 
+def ist_stoerung(code: str) -> bool:
+    """Netz-, Zeit- oder Serverfehler (nicht: Daten-, Format- oder Zugangsfehler)."""
+    return code.startswith(("NETZ", "ZEITUEBERSCHREITUNG", "HTTP_5")) or code == "HTTP_429"
+
+
+class Ausfallbremse:
+    """Begrenzt Abrufe während eines Supabase-Ausfalls über alle Zuschauer dieses Prozesses.
+
+    Nach einer Störung wartet jeder Abruf eine gemeinsame Sperrzeit ab (START, danach verdoppelt bis MAXIMUM) und
+    erhält ohne Anfrage denselben Fehler. Nach Ablauf prüft genau ein Abruf, ob Supabase wieder antwortet; die
+    übrigen warten weiter. Ein Erfolg hebt die Sperre sofort auf. Daten- und Prüfsummenfehler zählen nicht.
+    """
+
+    START, MAXIMUM, PROBE = 2.0, 10.0, 5.0
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.zuruecksetzen()
+
+    def zuruecksetzen(self) -> None:
+        with self._lock:
+            self.bis, self.code, self.folge, self.probe_bis = 0.0, None, 0, 0.0
+
+    def abrufen(self, abruf):
+        jetzt = time.time()
+        with self._lock:
+            if self.code is not None:
+                if jetzt < self.bis or jetzt < self.probe_bis:
+                    raise QuellenFehler("Die Daten sind zurzeit nicht verfügbar.", self.code)
+                self.probe_bis = jetzt + self.PROBE  # genau ein Abruf prüft, die übrigen warten
+        try:
+            ergebnis = abruf()
+        except QuellenFehler as fehler:
+            if ist_stoerung(fehler.code):
+                with self._lock:
+                    self.folge += 1
+                    self.code = fehler.code
+                    self.bis = time.time() + min(self.MAXIMUM, self.START * 2 ** (self.folge - 1))
+                    self.probe_bis = 0.0
+            raise
+        with self._lock:
+            self.bis, self.code, self.folge, self.probe_bis = 0.0, None, 0, 0.0
+        return ergebnis
+
+
+AUSFALL = Ausfallbremse()  # prozessweit: gilt für alle Sitzungen der App
+
+
 def _hole(zugang: Zugang, tabelle: str, parameter: list[tuple[str, str]], transport) -> list:
     holen = transport or https_transport
-    try:
-        status, text = holen(_url(zugang, tabelle, parameter), _kopf(zugang), zugang.zeitueberschreitung)
-    except QuellenFehler:
-        raise
-    except Exception as e:  # nie Exception-Text weitergeben (könnte Adresse oder Inhalte enthalten)
-        raise QuellenFehler("Die Daten sind zurzeit nicht verfügbar.", f"NETZ_{type(e).__name__.upper()}") from None
-    if status in (401, 403):
-        raise QuellenFehler("Zugang abgelehnt.", f"HTTP_{status}")
-    if not 200 <= status < 300:
-        raise QuellenFehler(f"Die Daten sind zurzeit nicht verfügbar (HTTP {status}).", f"HTTP_{status}")
+
+    def abruf():
+        try:
+            status, text = holen(_url(zugang, tabelle, parameter), _kopf(zugang), zugang.zeitueberschreitung)
+        except QuellenFehler:
+            raise
+        except Exception as e:  # nie Exception-Text weitergeben (könnte Adresse oder Inhalte enthalten)
+            raise QuellenFehler("Die Daten sind zurzeit nicht verfügbar.",
+                                f"NETZ_{type(e).__name__.upper()}") from None
+        if status in (401, 403):
+            raise QuellenFehler("Zugang abgelehnt.", f"HTTP_{status}")
+        if not 200 <= status < 300:
+            raise QuellenFehler(f"Die Daten sind zurzeit nicht verfügbar (HTTP {status}).", f"HTTP_{status}")
+        return status, text
+    status, text = AUSFALL.abrufen(abruf)
     try:
         daten = json.loads(text)
     except (ValueError, TypeError):

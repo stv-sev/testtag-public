@@ -5,6 +5,7 @@ import html
 import re
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -45,6 +46,14 @@ class AppTests(unittest.TestCase):
         cls._tmp.cleanup()
 
     def setUp(self):
+        import streamlit as st
+        st.cache_data.clear()  # gemeinsamer Cache gilt prozessweit: jeder Test beginnt leer
+        q.AUSFALL.zuruecksetzen()  # Ausfallbremse gilt prozessweit
+        self.versatz = 0.0  # simulierte verstrichene Zeit für die Cache-Zeitfenster der App
+        echte_zeit = time.time
+        uhr = mock.patch("time.time", new=lambda: echte_zeit() + self.versatz)
+        uhr.start()
+        self.addCleanup(uhr.stop)
         self.api = FakeOeffentlich(self.data["testtage"], self.data["rows"], self.data["snapshots"])
         patcher = mock.patch.object(q, "https_transport", self.api)
         patcher.start()
@@ -278,6 +287,8 @@ class AppTests(unittest.TestCase):
                     self.api.status = 503
                 else:
                     self.api.status = None
+                    live = next(t for t in self.api.testtage if t["id"] == LIVE_ID)
+                    live["stand_am"] = "2026-10-09T09:20:00+00:00"  # neue Publikation, Zeilen beschädigt
 
                     def kaputt(rows):
                         for row in rows:
@@ -285,6 +296,7 @@ class AppTests(unittest.TestCase):
                                 row["inhalt"]["gruppen"][0]["resultate"] = []
                         return rows
                     self.api.manipulieren = kaputt
+                self.versatz += 3
                 at.run()
                 self.assertEqual(self.cards(at), before)
                 warnings = [w.value for w in at.warning]
@@ -292,8 +304,14 @@ class AppTests(unittest.TestCase):
                                                  "Stand wird angezeigt (Stand ") for w in warnings), warnings)
                 self.assert_clean(at)
         self.api.status, self.api.manipulieren = None, None
+        self.versatz += 3
         at.run()
         self.assertEqual([w.value for w in at.warning], [])
+
+    def ausrichten(self, sekunden: int) -> None:
+        """Simulierte Zeit an den Anfang eines Cache-Zeitfensters legen (keine zufällige Fenstergrenze im Test)."""
+        jetzt = time.time()
+        self.versatz += sekunden - (jetzt % sekunden) + 0.05
 
     def _zeilen_abrufe(self) -> int:
         return sum("/veroeffentlichung?" in c["url"] for c in self.api.calls)
@@ -303,31 +321,152 @@ class AppTests(unittest.TestCase):
         geladen = self._zeilen_abrufe()
         self.assertEqual(geladen, 1)
         for _ in range(3):  # Takte ohne neue Publikation: nur die kleine Testtag-Abfrage
+            self.versatz += 5
             at.run()
         self.assertEqual(self._zeilen_abrufe(), geladen)
         self.assertIn("geprüft", self.text(at))
         live = next(t for t in self.api.testtage if t["id"] == LIVE_ID)
         live["stand_am"] = "2026-10-09T09:15:00+00:00"  # Publisher setzt stand_am nach allen Zeilen
+        self.versatz += 5
         at.run()
         self.assertEqual(self._zeilen_abrufe(), geladen + 1)
+        self.versatz += 5
         at.run()
         self.assertEqual(self._zeilen_abrufe(), geladen + 1)
         self.assert_clean(at)
 
-    def test_live_full_reload_at_least_every_60_seconds(self):
-        import dataclasses
-        from datetime import timedelta
+    def test_no_reload_per_viewer_only_rare_shared_control_load(self):
+        self.ausrichten(300)
+        zuschauer = [self.app(TT_SLUG) for _ in range(3)]
+        self.assertEqual(self._zeilen_abrufe(), 1)  # ein gemeinsamer Abruf für alle
+        for _ in range(12):  # eine Minute ohne Änderung
+            self.versatz += 5
+            for at in zuschauer:
+                at.run()
+        self.assertEqual(self._zeilen_abrufe(), 1)  # kein Reload je Zuschauer alle 60 s
+        self.versatz += 300  # neues Kontrollfenster
+        for at in zuschauer:
+            at.run()
+        self.assertEqual(self._zeilen_abrufe(), 2)  # eine gemeinsame Kontrollladung
+
+    def test_viewers_share_small_check_within_window(self):
+        zuschauer = [self.app(TT_SLUG) for _ in range(4)]
+        pruefungen = lambda: sum("/testtage?" in c["url"] for c in self.api.calls)  # noqa: E731
+        vorher = pruefungen()
+        self.ausrichten(3)
+        for at in zuschauer:
+            at.run()
+        self.assertEqual(pruefungen(), vorher + 1)  # ein Abruf für vier Zuschauer
+        self.assertEqual(self._zeilen_abrufe(), 1)
+
+    def test_new_publication_reaches_all_viewers_with_one_load(self):
+        zuschauer = [self.app(TT_SLUG) for _ in range(3)]
+        live = next(t for t in self.api.testtage if t["id"] == LIVE_ID)
+        live["stand_am"] = "2026-10-09T09:45:00+00:00"
+        self.versatz += 3
+        for at in zuschauer:
+            at.run()
+            self.assertIn("geprüft", self.text(at))
+        self.assertEqual(self._zeilen_abrufe(), 2)  # erster Abruf + ein gemeinsamer für den neuen Stand
+
+    def test_hidden_testtag_is_not_shown_from_cache_or_session(self):
         at = self.app(TT_SLUG)
-        geladen = self._zeilen_abrufe()
-        key = f"stand|{LIVE_ID}"
-        stand = at.session_state[key]
-        at.session_state[key] = dataclasses.replace(stand, geladen_am=stand.geladen_am - timedelta(seconds=61))
+        self.assertTrue(self.cards(at))
+        anderer = self.app(TT_SLUG)  # Stand liegt im gemeinsamen Cache
+        live = next(t for t in self.api.testtage if t["id"] == LIVE_ID)
+        live["ist_oeffentlich"] = False  # Sperre: Publisher verbirgt den Testtag
+        self.versatz += 3
         at.run()
-        self.assertEqual(self._zeilen_abrufe(), geladen + 1)  # Sicherheitsnetz trotz gleichem stand_am
+        anderer.run()
+        neu = self.app(TT_SLUG)
+        for sicht in (at, anderer, neu):
+            self.assertEqual(self.cards(sicht), [])
+            self.assertIn("Dieser Testtag ist nicht verfügbar.", self.text(sicht))
+        for sicht in (at, anderer):  # auch der frühere Sitzungsstand ist verworfen
+            self.assertNotIn(f"stand|{LIVE_ID}", sicht.session_state)
+        self.assert_clean(neu)
+
+    def test_outage_keeps_last_valid_state_and_recovers(self):
+        at = self.app(TT_SLUG)
+        before = self.cards(at)
+        self.api.ausnahme = OSError("Netz weg")
+        for _ in range(3):
+            self.versatz += 5
+            at.run()
+            self.assertEqual(self.cards(at), before)
+            self.assertTrue(any(w.value.startswith("Aktualisierung vorübergehend nicht möglich") for w in at.warning))
+        self.api.ausnahme = None
+        for _ in range(4):  # Wiederherstellung spätestens nach der längsten gemeinsamen Sperrzeit (10 s)
+            self.versatz += 5
+            at.run()
+        self.assertEqual([w.value for w in at.warning], [])
+        self.assertEqual(self.cards(at), before)
+
+    def test_new_viewer_during_outage_gets_data_after_recovery(self):
+        self.api.ausnahme = OSError("Netz weg")
+        at = self.app(TT_SLUG)
+        self.assertIn("Die Seite versucht es automatisch erneut.", self.text(at))
+        self.assertEqual(self.cards(at), [])  # keine scheinbar gültigen Daten
+        self.api.ausnahme = None
+        for _ in range(4):
+            self.versatz += 5
+            at.run()
+        self.assertTrue(self.cards(at))
+        self.assertNotIn("versucht es automatisch erneut", self.text(at))
+        self.assert_clean(at)
+
+    def test_waiting_view_rebuilds_page_after_recovery(self):
+        app = __import__("app")
+        with mock.patch.object(app.st, "rerun") as neu, mock.patch.object(app.st, "info") as info:
+            app._warten(mock.Mock(side_effect=q.QuellenFehler("weg", "NETZ")))
+            neu.assert_not_called()
+            info.assert_called_once_with(app.WARTET)
+            app._warten(lambda: None)
+            neu.assert_called_once_with(scope="app")
+
+    def test_testtag_hidden_during_outage_is_not_shown_after_recovery(self):
+        alt = self.app(TT_SLUG)
+        self.assertTrue(self.cards(alt))
+        self.api.ausnahme = OSError("Netz weg")
+        self.versatz += 5
+        alt.run()
+        neu = self.app(TT_SLUG)  # neuer Zuschauer während des Ausfalls
+        live = next(t for t in self.api.testtage if t["id"] == LIVE_ID)
+        live["ist_oeffentlich"] = False  # während des Ausfalls verborgen
+        self.api.ausnahme = None
+        for _ in range(4):
+            self.versatz += 5
+            alt.run()
+            neu.run()
+        for sicht in (alt, neu):
+            self.assertEqual(self.cards(sicht), [])
+            self.assertIn("Dieser Testtag ist nicht verfügbar.", self.text(sicht))
+            self.assertNotIn(f"stand|{LIVE_ID}", sicht.session_state)
+
+    def test_outage_attempts_are_limited_across_viewers(self):
+        zuschauer = [self.app(TT_SLUG) for _ in range(5)]
+        self.api.ausnahme = OSError("Netz weg")
+        vorher = len(self.api.calls)
+        for _ in range(12):  # eine Minute Ausfall, 5 Zuschauer im 5-s-Takt
+            self.versatz += 5
+            for at in zuschauer:
+                at.run()
+        versuche = len(self.api.calls) - vorher
+        self.assertLessEqual(versuche, 8)  # statt rund 60 ohne gemeinsame Bremse
+        self.assertGreaterEqual(versuche, 3)  # es wird weiter geprüft
+        self.api.ausnahme = None
+        for _ in range(4):
+            self.versatz += 5
+            for at in zuschauer:
+                at.run()
+        for at in zuschauer:
+            self.assertTrue(self.cards(at))
+            self.assertEqual([w.value for w in at.warning], [])
 
     def test_archive_and_prepared_testtag_are_not_polled(self):
         at = self.app(ARCHIV_SLUG)
         abrufe = len(self.api.calls)
+        self.versatz += 600  # auch nach Ablauf aller Zeitfenster: Archiv bleibt eingefroren
         at.run()
         self.assertEqual(sum("/archiv_snapshots?" in c["url"] for c in self.api.calls[abrufe:]), 0)
 
@@ -355,8 +494,9 @@ class AppTests(unittest.TestCase):
         pruefungen = lambda: sum("/testtage?" in c["url"] for c in self.api.calls)  # noqa: E731
         live = self.app(TT_SLUG)
         before = pruefungen()
+        self.versatz += 3
         live.run()
-        self.assertGreater(pruefungen(), before)  # Live prüft bei jedem Takt den Stand
+        self.assertGreater(pruefungen(), before)  # Live prüft bei jedem Takt den Stand (gemeinsam je 3 s)
 
     # ── Archiv (P1F) ──
     def test_archive_is_shown_only_from_snapshot(self):
@@ -389,6 +529,7 @@ class AppTests(unittest.TestCase):
         # Sitzungsstand stammt noch aus "live"; jetzt archiviert, Snapshot aber beschädigt
         at.session_state[f"quelle|{_support.ARCHIV_ID}"] = "live"
         self.api.manipulieren_archiv = lambda snaps: []
+        self.versatz += 300  # neues Kontrollfenster: nicht aus dem gemeinsamen Cache
         at.run()
         self.assertEqual(self.cards(at), before)
         self.assertTrue(any(w.value.startswith("Aktualisierung vorübergehend nicht möglich") for w in at.warning))

@@ -337,10 +337,31 @@ dem Projektstamm und auf Streamlit Community Cloud.
 - **Zeitplan:** ein gemeinsamer Tagesablauf, AK5–AK9+ vor AK9–AK12, in der Reihenfolge des Publishers.
 
 Nur Testtage mit Status `live` aktualisieren sich etwa alle 5 Sekunden (`st.fragment(run_every="5s")`, keine
-neue Abhängigkeit). Je Takt wird nur `testtage.stand_am` abgefragt (wenige Bytes). Alle Zeilen werden nur neu
-geladen, wenn sich `stand_am` geändert hat, solange ein Ladefehler besteht und spätestens alle 60 Sekunden. Der
-Publisher setzt `stand_am` erst, nachdem alle Zeilen geschrieben und geprüft sind. Vorbereitete und archivierte
-Testtage werden je Sitzung einmal geladen.
+neue Abhängigkeit). Die Lesezugriffe werden zwischen allen Zuschauern geteilt (`st.cache_data`):
+
+- **Änderungsabfrage:** `testtage` (`stand_am`, Status, Sichtbarkeit) einmal je 3-s-Zeitfenster für alle.
+- **Datenstand:** alle Zeilen, vollständig geprüft (Schema, Prüfsummen, Tombstones), je Testtag, Status und
+  `stand_am`. Der Publisher setzt `stand_am` erst nach allen Zeilen; ein neuer `stand_am` lädt einmal für alle.
+- **Kontrollladung:** einmal je 5-min-Zeitfenster für alle gemeinsam, falls Zeilen ohne neuen `stand_am`
+  geändert wurden (Publikation brach nach dem Schreiben der Zeilen ab). Kein Reload je Zuschauer.
+- **Fehler** werden nie zwischengespeichert. Jede Sitzung behält ihren letzten gültigen Stand mit Hinweis.
+- **Ausfallbremse** (`quelle.AUSFALL`, prozessweit für alle Zuschauer): Nach einem Netz-, Zeit- oder Serverfehler
+  (HTTP 5xx/429) senden alle Zuschauer eine gemeinsame Sperrzeit lang keine Anfrage (2, 4, 8, höchstens 10 s);
+  danach prüft genau ein Abruf, ob Supabase wieder antwortet. Daten-, Prüfsummen- und Zugangsfehler zählen nicht.
+- **Seitenaufruf während eines Ausfalls:** Hat die Sitzung noch keinen Stand, zeigt die Seite einen Hinweis und
+  versucht es im Takt automatisch erneut; nach der Wiederherstellung baut sie sich selbst neu auf (Daten oder
+  „nicht verfügbar“, falls der Testtag inzwischen verborgen wurde). Gilt auch für die Übersicht.
+- **Verborgen:** liefert die Änderungsabfrage keinen öffentlichen Testtag mehr, verwirft die Sitzung ihren Stand und
+  zeigt „nicht verfügbar“ – kein Weiterzeigen aus Cache oder Sitzung.
+- **Archiv:** einmal je Sitzung (aus dem gemeinsamen Cache), danach eingefroren, keine Abfragen.
+- **Komprimierung:** Anfragen senden `Accept-Encoding: gzip`; Supabase antwortet komprimiert (gemessen: Datenstand
+  161 324 B → 34 856 B). Entpackt wird mit der Standardbibliothek, höchstens 64 MB.
+
+Gemessen mit 10 gleichzeitigen Zuschauern und einem vollständig gefüllten synthetischen Testtag (2,0 MB entpackt):
+eine Ladung des Datenstands (138 KB übertragen) je Publikation für alle, sonst rund eine kleine Abfrage je 3–5 s
+für alle zusammen; Publikation bis Anzeige 2–8 s.
+
+Vorbereitete und archivierte Testtage werden je Sitzung einmal geladen.
 
 Archivierte Testtage zeigen ausschliesslich ihren Snapshot aus `archiv_snapshots` (P1F, siehe unten).
 
