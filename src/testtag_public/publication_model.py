@@ -718,6 +718,45 @@ def assign_ranks(entries: list[dict], points_key: str = "punkte") -> list[dict]:
     return out
 
 
+def ranking_structure(program: ProgramResult, ak_kontr: int) -> dict:
+    """Vorgesehene Geräte, Linien und Athletiktests einer AK (nur Testprogramm, keine Resultate).
+
+    Dient der Rangliste als Gliederung, damit ein noch fehlendes Einzelresultat als „–“ erscheinen kann. Codes und
+    Bezeichnungen entsprechen denen der Einzelwertungen (`code`, `anzeige`, `test`). Sprung AK9: „Sprung 1“ und
+    „Sprung 2“; AK10–AK12: Pflichtsprung plus genau eine Alternative (`alternative`).
+    """
+    src, definition = program.source, program.definition
+    ignore = Issues()  # Strukturfehler meldet bereits die Validierung
+    geraete = []
+    for station in src.stations:
+        if station.geraet_code in ATHLETIK_GERAETECODE.values():
+            continue
+        linien = []
+        for line in sorted((d for d in src.line_definitions if d.geraet_code == station.geraet_code and d.nummer >= 1
+                            and d.versatz_min is not None and d.versatz_max is not None), key=lambda d: d.nummer):
+            sprung = definition.sprung_regel and station.name == SPRUNG
+            if sprung and ak_kontr == 9:
+                if line.nummer in (1, 2):
+                    linien.append({"code": f"sprung-{line.nummer}", "anzeige": f"Sprung {line.nummer}"})
+                continue
+            if not _intended(src, line, ak_kontr, "", ignore):
+                continue
+            eintrag = {"code": f"{line.geraet_code}-{line.nummer}", "anzeige": clean_text(line.name)}
+            if sprung and line.nummer >= 2:
+                eintrag["alternative"] = True
+            linien.append(eintrag)
+        if linien:
+            geraete.append({"geraet": station.name, "linien": linien})
+    out = {"geraete": geraete}
+    for bereich in ATHLETIK_BEREICHE:
+        code = ATHLETIK_GERAETECODE[bereich]
+        tests = sorted((d for d in src.line_definitions if d.geraet_code == code and d.nummer >= 1),
+                       key=lambda d: d.nummer)
+        aktiv = program.modes.get(bereich) in (MODUS_VOR_ORT, MODUS_EXTERN)
+        out[bereich] = [{"code": f"{code}-{d.nummer}", "test": clean_text(d.name)} for d in tests] if aktiv else []
+    return out
+
+
 def build_rankings(program: ProgramResult) -> list[dict]:
     """Je AK: Technik-, Athletik- und Gesamtrangliste aus den sichtbaren Einzelwertungen."""
     sums: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
@@ -743,6 +782,7 @@ def build_rankings(program: ProgramResult) -> list[dict]:
             "technik": assign_ranks([dict(r, punkte=r["technik"]) for r in rows]),
             "athletik": assign_ranks([dict(r, punkte=r["athletik"]) for r in rows]),
             "gesamt": assign_ranks([dict(r, punkte=r["gesamt"]) for r in rows]),
+            "struktur": ranking_structure(program, people[0].ak_kontr),
         })
     return out
 
@@ -865,10 +905,13 @@ def content_checksum(inhalt: dict) -> str:
     return canonical_sha256(strip_volatile(inhalt))
 
 
-def _row(bereich: str, programm: str, ak: str, art: str, gruppen: list, hinweis: Optional[str] = None) -> dict:
+def _row(bereich: str, programm: str, ak: str, art: str, gruppen: list, hinweis: Optional[str] = None,
+         struktur: Optional[dict] = None) -> dict:
     inhalt = {"schema_version": SCHEMA_VERSION, "art": art, "gruppen": gruppen}
     if hinweis:
         inhalt["hinweis"] = hinweis
+    if struktur is not None:
+        inhalt["struktur"] = struktur
     return {"bereich": bereich, "programm": programm, "ak": ak, "inhalt": inhalt,
             "pruefsumme": content_checksum(inhalt)}
 
@@ -897,5 +940,5 @@ def publication_rows(state: dict) -> list[dict]:
             rows.append(_row("resultate_live", name, ak, "resultate_live", [{"ak": ak, "resultate": live}], hint))
             rows.append(_row("resultate_rangliste", name, ak, "resultate_rangliste", [
                 {"liste": liste, "eintraege": group[liste]} for liste in ("technik", "athletik", "gesamt")
-            ], hint))
+            ], hint, group["struktur"]))
     return rows

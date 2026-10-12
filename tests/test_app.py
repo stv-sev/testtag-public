@@ -216,12 +216,19 @@ class AppTests(unittest.TestCase):
         rl = self.block(at, "tt-liste tt-rangliste")
         self.assertIn("background:#FFD700", rl)  # Rang 1 golden
         self.assertEqual(rl.count("background:#FFD700"), 1)  # keine Medaille ohne Resultat
-        self.assertIn("Noch keine Einzelresultate veröffentlicht.", klartext(rl))
-        ohne = klartext(rl.split("tt-rangkarte")[-1])  # Person ohne Resultat: keine scheinbaren Nullwerte
-        self.assertIn("Technik – Beweglichkeit – Kraft – Athletik – Gesamt –", ohne)
-        erste = klartext(rl.split("tt-rangkarte")[1])  # Technik und Kraft vorhanden, Beweglichkeit nicht
-        self.assertIn("Technik 7.5 Beweglichkeit – Kraft 8 Athletik 8 Gesamt 15.5", erste)
-        self.assertIn("Boden · Synth Boden vorwärts · S 5 · T 7.5", klartext(rl))  # Einzelheiten
+        karten = rl.split("tt-rangkarte'>")[1:]
+        kompakt = [klartext(k.split("</summary>")[0]) for k in karten]  # Liste: Rang, Turner, Verein, Total
+        self.assertEqual(kompakt[0], "1 Lea Synthaler TV Testdorf 15.5 ▾")
+        self.assertNotIn("tt-chip", rl)
+        erste = klartext(karten[0].split("</summary>")[1])  # Details erst nach Antippen
+        self.assertIn("Technik je Gerät Boden 7.5 Pferd – Ringe –", erste)
+        self.assertIn("Total Technik 7.5 Total Athletik 8 Gesamt 15.5", erste)
+        ohne = klartext(karten[-1].split("</summary>")[1])  # Person ohne Resultat: keine scheinbaren Nullwerte
+        self.assertIn("Total Technik – Total Athletik – Gesamt –", ohne)
+        at.radio(key="rl_art").set_value("technik").run()
+        rl = self.block(at, "tt-liste tt-rangliste")
+        self.assertIn("Boden 7.5 Synth Boden vorwärts S 5 T 7.5", klartext(rl))  # Gerät aufklappbar, S/T
+        self.assertNotIn("<details class='tt-geraet' open", rl)
         at.radio(key="rl_art").set_value("athletik").run()
         self.assertEqual([p for _r, p in self.raenge(at)], ["8", "–", "–", "–"])
         self.assertIn("Alle Rotationen freigegeben.", self.text(at))  # Hinweis des Publishers

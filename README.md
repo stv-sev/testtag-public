@@ -499,3 +499,25 @@ frei. Jeder Leseversuch scheiterte deshalb mit „Exceldatei ist gesperrt“, un
 geöffneter Mappe nie. `excel_probe.stable_temp_copy` öffnet die Quelle jetzt unter Windows mit `CreateFileW`,
 nur lesend und mit Freigabe für Lesen, Schreiben und Löschen. Ein wirklich exklusiv gesperrter Speicherstand wird
 weiterhin wie bisher wiederholt. Regressionstests: `OpenWorkbookTests` in `tests/test_live_runner.py`.
+
+## Ranglistenansicht: Gesamt, Technik, Athletik
+
+Die Rangliste hat drei Ebenen (Gesamt, Technik, Athletik), je rangiert nach dem Total der Ebene. Programm und AK
+bleiben wählbar. Die Liste zeigt kompakt Rang, Turner, Verein und Total. Erst nach Antippen erscheinen die Details:
+
+- **Gesamt:** Total je Technikgerät, Total Technik, Total Athletik, Gesamt. Beweglichkeit und Kraft zählen nur im
+  Athletiktotal, auch wenn ein Krafttest organisatorisch an einem Gerät erfasst wird.
+- **Technik:** Total Technik und je Gerät ein einzeln aufklappbares Feld mit den Linien (S = gewertete SKS,
+  T = Linienpunkte). Sprung AK9 heisst „Sprung 1“ / „Sprung 2“; bei AK10–AK12 erscheint die gewählte Alternative.
+- **Athletik:** jeder vorgesehene Beweglichkeits- und Krafttest, Total Beweglichkeit, Total Kraft, Total Athletik.
+
+Ränge, Gleichstände und alle Totale stammen unverändert aus der Rangliste des Publishers. Die App summiert nur die
+veröffentlichten Linienpunkte je Gerät zur Anzeige. Passt die Aufschlüsselung nicht exakt zu den veröffentlichten
+Totalen, zeigt sie keine Details. Ein fehlendes Resultat erscheint als „–“, eine Nullwertung als „0“.
+
+**Publikationsformat:** Jede Zeile `resultate_rangliste` enthält zusätzlich `inhalt.struktur` mit den für die AK
+vorgesehenen Geräten und Linien (`code`, `anzeige`, bei Sprung-Alternativen `alternative`) und den Athletiktests
+(`code`, `test`). Die Struktur stammt nur aus dem Testprogramm (akMinMax, Athletikmodus) und enthält keine Resultate.
+Sie ist nötig, damit ein noch fehlendes Resultat als „–“ erscheinen kann. Ältere Stände ohne `struktur` (z. B.
+bestehende Archive) zeigen nur die veröffentlichten Linien und Tests.
+

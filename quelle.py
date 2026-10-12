@@ -21,6 +21,7 @@ Offline prüfbar: Jeder Aufruf nimmt einen austauschbaren `transport(url, kopf, 
 from __future__ import annotations
 
 import json
+import math
 import re
 import socket
 import sys
@@ -38,7 +39,7 @@ if _SRC.is_dir() and str(_SRC) not in sys.path:  # lokal aus dem Projektstamm un
 
 from testtag_public.archive import ArchiveFormatError, verify_archive, verify_snapshot_row  # noqa: E402
 from testtag_public.publication_model import (  # noqa: E402
-    PROGRAM_ORDER, SCHEMA_VERSION, content_checksum, sort_live,
+    PROGRAM_ORDER, SCHEMA_VERSION, content_checksum, number_out, sort_live,
 )
 
 ZEITUEBERSCHREITUNG = 5.0
@@ -374,6 +375,100 @@ def rangliste(stand: Stand, programm: str, ak: str, art: str) -> list[dict]:
                 if gruppe.get("liste") == art:
                     return list(gruppe.get("eintraege") or [])
     return []
+
+
+def ranglisten_struktur(stand: Stand, programm: str, ak: str) -> Optional[dict]:
+    """Vorgesehene Geräte, Linien und Athletiktests der AK (ab Publikation mit `struktur`), sonst None."""
+    for d in stand.saetze:
+        if d.bereich == RANGLISTE and d.programm == programm and d.ak == ak:
+            struktur = d.inhalt.get("struktur")
+            return struktur if isinstance(struktur, dict) else None
+    return None
+
+
+TOLERANZ = 1e-6
+
+
+def _summe(werte: list) -> Optional[float]:
+    return number_out(math.fsum(float(w) for w in werte)) if werte else None
+
+
+def _natuerlich(code: str) -> tuple:
+    return tuple((0, int(t), "") if t.isdigit() else (1, 0, t) for t in re.split(r"(\d+)", str(code)) if t)
+
+
+def _abgeleitete_struktur(alle: list[dict]) -> dict:
+    """Ersatz für ältere Stände ohne `struktur`: nur die Linien/Tests, die in der AK veröffentlicht sind."""
+    geraete: dict[str, dict[str, dict]] = {}
+    athletik: dict[str, dict[str, dict]] = {"beweglichkeit": {}, "kraft": {}}
+    for r in alle:
+        if r.get("bereich") == "technik":
+            geraete.setdefault(str(r.get("geraet")), {}).setdefault(str(r.get("code")), {
+                "code": r.get("code"), "anzeige": r.get("anzeige")})
+        elif r.get("bereich") in athletik:
+            athletik[r["bereich"]].setdefault(str(r.get("code")), {"code": r.get("code"), "test": r.get("test")})
+    ordnung = sorted(geraete, key=lambda g: min(_natuerlich(c) for c in geraete[g]))
+    return {"geraete": [{"geraet": g, "linien": [geraete[g][c] for c in sorted(geraete[g], key=_natuerlich)]}
+                        for g in ordnung],
+            **{b: [t[c] for c in sorted(t, key=_natuerlich)] for b, t in athletik.items()}}
+
+
+def turner_details(eintrag: dict, eigene: list[dict], struktur: Optional[dict], alle: list[dict]) -> Optional[dict]:
+    """Aufschlüsselung eines Ranglisteneintrags aus seinen veröffentlichten Einzelwertungen (reine Anzeige).
+
+    Keine Rangberechnung: Totale stammen aus dem Ranglisteneintrag. Gerätetotale sind Summen der Linienpunkte (T)
+    dieses Geräts. Fehlt ein vorgesehenes Resultat, ist der Wert None („–“); eine Nullwertung bleibt 0. Passt die
+    Aufschlüsselung nicht exakt zu den veröffentlichten Totalen, wird None geliefert (keine widersprüchliche Anzeige).
+    """
+    struktur = struktur if isinstance(struktur, dict) else _abgeleitete_struktur(alle)
+    technik = {str(r.get("code")): r for r in eigene if r.get("bereich") == "technik"}
+    athletik = {b: {str(r.get("code")): r for r in eigene if r.get("bereich") == b} for b in ("beweglichkeit", "kraft")}
+    for teil, werte in (("technik", [r.get("T") for r in technik.values()]),
+                        *((b, [r.get("punkte") for r in athletik[b].values()]) for b in athletik)):
+        try:
+            if abs(math.fsum(float(w) for w in werte) - float(eintrag.get(teil) or 0)) > TOLERANZ:
+                return None
+        except (TypeError, ValueError):
+            return None
+    if sum(1 for r in eigene if r.get("bereich") == "technik") != len(technik) or \
+            sum(1 for r in eigene if r.get("bereich") in athletik) != sum(len(t) for t in athletik.values()):
+        return None  # doppelte Codes: nicht eindeutig zuordenbar
+
+    geraete, zugeordnet = [], set()
+    for geraet in struktur.get("geraete") or []:
+        linien = []
+        alternativen = [li for li in geraet.get("linien") or [] if li.get("alternative")]
+        gewaehlt = any(str(li.get("code")) in technik for li in alternativen)
+        for linie in geraet.get("linien") or []:
+            code = str(linie.get("code"))
+            r = technik.get(code)
+            if linie.get("alternative") and gewaehlt and r is None:
+                continue  # die andere Sprung-Alternative wurde gewählt
+            zugeordnet.add(code)
+            linien.append({"anzeige": linie.get("anzeige"), "S": r.get("S") if r else None,
+                           "T": r.get("T") if r else None, "alternative": bool(linie.get("alternative")) and r is None})
+        werte = [technik[str(li.get("code"))]["T"] for li in geraet.get("linien") or [] if str(li.get("code")) in technik]
+        geraete.append({"geraet": geraet.get("geraet"), "total": _summe(werte), "linien": linien})
+    rest = [r for c, r in technik.items() if c not in zugeordnet]  # nicht in der Gliederung: trotzdem zeigen
+    for r in sorted(rest, key=lambda r: _natuerlich(r.get("code"))):
+        ziel = next((g for g in geraete if g["geraet"] == r.get("geraet")), None)
+        if ziel is None:
+            ziel = {"geraet": r.get("geraet"), "total": None, "linien": []}
+            geraete.append(ziel)
+        ziel["linien"].append({"anzeige": r.get("anzeige"), "S": r.get("S"), "T": r.get("T"), "alternative": False})
+        ziel["total"] = _summe([*([ziel["total"]] if ziel["total"] is not None else []), r.get("T")])
+
+    out = {"geraete": geraete}
+    for bereich, tests in athletik.items():
+        zeilen = []
+        for test in struktur.get(bereich) or []:
+            r = tests.get(str(test.get("code")))
+            zeilen.append({"test": test.get("test"), "punkte": r.get("punkte") if r else None})
+        bekannt = {str(t.get("code")) for t in struktur.get(bereich) or []}
+        zeilen += [{"test": r.get("test"), "punkte": r.get("punkte")}
+                   for c, r in sorted(tests.items(), key=lambda kv: _natuerlich(kv[0])) if c not in bekannt]
+        out[bereich] = zeilen
+    return out
 
 
 def startlisten(stand: Stand) -> list[tuple[str, list[dict]]]:

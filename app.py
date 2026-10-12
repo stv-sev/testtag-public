@@ -85,10 +85,27 @@ STIL = """
 .tt-chip.tt-end { background: #0D4E73; color: #fff; font-weight: 700; }
 .tt-karte details > summary { list-style: none; cursor: pointer; }
 .tt-karte details > summary::-webkit-details-marker { display: none; }
-.tt-karte details[open] .tt-mehr { display: none; }
-.tt-mehr { font-size: 0.68rem; color: #2C7FA6; padding: 4px 0 0 42px; }
-.tt-einzeln { margin: 8px 0 2px 42px; font-size: 0.74rem; color: #15608A; }
-.tt-einzeln div { padding: 3px 0; border-bottom: 1px solid #f2f2f2; }
+.tt-pfeil { font-style: normal; color: #6FAFC9; font-size: 0.8rem; flex-shrink: 0; transition: transform .15s; }
+.tt-karte details[open] > summary .tt-pfeil { transform: rotate(180deg); }
+.tt-details { margin: 8px 0 2px 42px; font-size: 0.8rem; color: #15608A; }
+.tt-dtitel { font-size: 0.7rem; font-weight: 700; color: #2C7FA6; text-transform: uppercase; letter-spacing: .04em;
+             margin: 8px 0 2px; }
+.tt-dz, .tt-geraet > summary, .tt-linie { display: flex; align-items: baseline; gap: 8px; padding: 4px 0;
+                                         border-bottom: 1px solid #f2f2f2; }
+.tt-dz span, .tt-geraet > summary span, .tt-linie > span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.tt-dz b, .tt-geraet > summary b { color: #0D4E73; flex-shrink: 0; }
+.tt-dz.tt-total { font-weight: 600; }
+.tt-dz.tt-haupt { background: #0D4E73; color: #fff; border-radius: 4px; padding: 4px 8px; margin-top: 4px; }
+.tt-dz.tt-haupt b { color: #fff; }
+.tt-geraet > summary i { font-style: normal; color: #6FAFC9; font-size: 0.75rem; width: 1em; text-align: center;
+                         flex-shrink: 0; }
+.tt-geraet > summary i::before { content: "▸"; }
+.tt-geraet[open] > summary i::before { content: "▾"; }
+.tt-linien { padding: 0 0 4px 10px; background: #F6FAFC; }
+.tt-linie { font-size: 0.76rem; color: #4A6A80; }
+.tt-st { flex-shrink: 0; min-width: 3.6em; text-align: right; }
+.tt-linie b.tt-st { color: #0D4E73; }
+.tt-dhinweis { color: #888; font-size: 0.76rem; padding: 4px 0; }
 .tt-programm { font-size: 1.05rem; font-weight: 700; color: #0D4E73; margin: 14px 0 8px; }
 .tt-tabelle { border: 1px solid #D6EAF3; border-radius: 6px; margin-bottom: 16px; overflow: hidden; }
 .tt-titel { background: #0D4E73; color: #fff; padding: 8px 14px; font-weight: 700; font-size: 0.92rem; }
@@ -129,7 +146,7 @@ STIL = """
 .st-key-zurueck button { border-radius: 20px; min-height: 40px; }
 @media (max-width: 640px) {
   .tt-chips { padding-left: 0; }
-  .tt-mehr, .tt-einzeln { padding-left: 0; margin-left: 0; }
+  .tt-details { margin-left: 0; }
   .tt-tabelle th, .tt-tabelle td { padding: 5px 6px; }
   .st-key-bereich [role="radiogroup"] > label { padding: 7px 9px; }
   .st-key-bereich [role="radiogroup"] { gap: 4px; }
@@ -346,37 +363,66 @@ def _hat_resultate(resultate: list[dict], art: str) -> bool:
     return bool(resultate)
 
 
-def rang_karte(e: dict, art: str, eigene: list[dict]) -> str:
+def _dz(label: str, wert, klasse: str = "") -> str:
+    """Detailzeile: Bezeichnung links, Wert rechts (fehlend „–“, Nullwertung 0)."""
+    return (f"<div class='tt-dz{(' ' + klasse) if klasse else ''}'><span>{_h(label)}</span>"
+            f"<b>{_h(_zahl(wert))}</b></div>")
+
+
+def _details_gesamt(e: dict, d: dict, vorhanden: dict) -> str:
+    teile = ["<div class='tt-dtitel'>Technik je Gerät</div>"]
+    teile += [_dz(g["geraet"], g["total"]) for g in d["geraete"]]
+    teile += [_dz("Total Technik", e.get("technik") if vorhanden["technik"] else None, "tt-total"),
+              _dz("Total Athletik", e.get("athletik") if vorhanden["athletik"] else None, "tt-total"),
+              _dz("Gesamt", e.get("gesamt") if vorhanden["gesamt"] else None, "tt-total tt-haupt")]
+    return "".join(teile)
+
+
+def _details_technik(e: dict, d: dict, vorhanden: dict) -> str:
+    teile = [_dz("Total Technik", e.get("technik") if vorhanden["technik"] else None, "tt-total tt-haupt")]
+    for g in d["geraete"]:
+        linien = "".join(
+            f"<div class='tt-linie'><span>{_h(li['anzeige'])}{' (Alternative)' if li['alternative'] else ''}</span>"
+            f"<span class='tt-st'>S {_h(_zahl(li['S']))}</span><b class='tt-st'>T {_h(_zahl(li['T']))}</b></div>"
+            for li in g["linien"])
+        teile.append(f"<details class='tt-geraet'><summary><span>{_h(g['geraet'])}</span>"
+                     f"<b>{_h(_zahl(g['total']))}</b><i></i></summary><div class='tt-linien'>{linien}</div></details>")
+    return "".join(teile)
+
+
+def _details_athletik(e: dict, d: dict, vorhanden: dict) -> str:
+    teile = []
+    for bereich in ("beweglichkeit", "kraft"):
+        text = q.BEREICH_ATHLETIK_TEXT[bereich]
+        teile.append(f"<div class='tt-dtitel'>{text}</div>")
+        teile += [_dz(t["test"], t["punkte"]) for t in d[bereich]]
+        teile.append(_dz(f"Total {text}", e.get(bereich) if vorhanden[bereich] else None, "tt-total"))
+    teile.append(_dz("Total Athletik", e.get("athletik") if vorhanden["athletik"] else None, "tt-total tt-haupt"))
+    return "".join(teile)
+
+
+DETAILS = {"gesamt": _details_gesamt, "technik": _details_technik, "athletik": _details_athletik}
+
+
+def rang_karte(e: dict, art: str, eigene: list[dict], details: dict | None) -> str:
+    """Kompakte Zeile (Rang, Turner, Verein, Total der Ebene); Details der Ebene erst nach Antippen."""
     rang = e.get("rang")
     punkte = _zahl(e.get("punkte")) if _hat_resultate(eigene, art) else "–"
     farbe = RANG_FARBE.get(rang) if isinstance(rang, int) and punkte != "–" else None
     stil = f" style='background:{farbe};color:#0D4E73;'" if farbe else ""
     vorhanden = {"technik": _hat_resultate(eigene, "technik"), "athletik": _hat_resultate(eigene, "athletik"),
                  "beweglichkeit": any(r.get("bereich") == "beweglichkeit" for r in eigene),
-                 "kraft": any(r.get("bereich") == "kraft" for r in eigene), "gesamt": bool(eigene)}
-    chips = "".join(f"<span class='tt-chip{' tt-end' if key == 'gesamt' else ''}'>{label} "
-                    f"{_h(_zahl(e.get(key)) if vorhanden[key] else '–')}</span>"  # ohne Resultat nie scheinbar 0
-                    for key, label in (("technik", "Technik"), ("beweglichkeit", "Beweglichkeit"), ("kraft", "Kraft"),
-                                       ("athletik", "Athletik"), ("gesamt", "Gesamt")))
-    if eigene:
-        zeilen = []
-        for r in eigene:
-            if r.get("bereich") == "technik":
-                zeilen.append(f"<div>{_h(r.get('geraet'))} · {_h(r.get('anzeige'))} · S {_h(_zahl(r.get('S')))} · "
-                              f"T {_h(_zahl(r.get('T')))}</div>")
-            else:
-                zeilen.append(f"<div>{_h(q.BEREICH_ATHLETIK_TEXT.get(r.get('bereich'), ''))} · {_h(r.get('test'))} · "
-                              f"Punkte {_h(_zahl(r.get('punkte')))}</div>")
-        einzeln = "".join(zeilen)
+                 "kraft": any(r.get("bereich") == "kraft" for r in eigene), "gesamt": bool(eigene)}  # nie scheinbar 0
+    if details is None:
+        inhalt = "<div class='tt-dhinweis'>Die Aufschlüsselung ist zurzeit nicht verfügbar.</div>"
     else:
-        einzeln = "<div>Noch keine Einzelresultate veröffentlicht.</div>"
+        inhalt = DETAILS[art](e, details, vorhanden)
     return (f"<div class='tt-karte tt-rangkarte'><details><summary><div class='tt-karte-kopf'>"
             f"<div class='tt-rang'{stil} title='Rang {_h(rang)}'>{_h(rang)}</div>"
             f"<div class='tt-text'><strong>{_h(e.get('vorname'))} {_h(e.get('name'))}</strong>"
             f"<small>{_h(e.get('verein'))}</small></div>"
-            f"<div class='tt-wert'><div class='tt-note'>{_h(punkte)}</div></div></div>"
-            f"<div class='tt-chips'>{chips}</div><div class='tt-mehr'>Einzelresultate anzeigen ▾</div></summary>"
-            f"<div class='tt-einzeln'>{einzeln}</div></details></div>")
+            f"<div class='tt-wert'><div class='tt-note'>{_h(punkte)}</div></div><i class='tt-pfeil'>▾</i></div>"
+            f"</summary><div class='tt-details'>{inhalt}</div></details></div>")
 
 
 def _ranglisten(stand) -> None:
@@ -396,13 +442,19 @@ def _ranglisten(stand) -> None:
     if not eintraege:
         leer("Für diese Auswahl ist noch keine Rangliste veröffentlicht.")
         return
+    alle = q.live_resultate(stand, programm, ak)
+    struktur = q.ranglisten_struktur(stand, programm, ak)
     je_person: dict[str, list] = {}
-    for r in q.live_resultate(stand, programm, ak):
+    for r in alle:
         je_person.setdefault(r.get("teilnehmer"), []).append(r)
+    karten = []
+    for e in eintraege:  # Reihenfolge und Ränge vom Publisher
+        eigene = je_person.get(e.get("teilnehmer"), [])
+        karten.append(rang_karte(e, art, eigene, q.turner_details(e, eigene, struktur, alle)))
     teile = [f"<div class='tt-anzahl'>{_h(hinweis)}</div>" if hinweis else "", "<div class='tt-liste tt-rangliste'>"]
-    teile += [rang_karte(e, art, je_person.get(e.get("teilnehmer"), [])) for e in eintraege]  # Reihenfolge vom Publisher
-    teile.append("</div><div class='tt-anzahl'>– = noch keine veröffentlichten Resultate. Gleiche Punktzahl ergibt "
-                 "den gleichen Rang. Karte antippen für Einzelresultate.</div>")
+    teile += karten
+    teile.append("</div><div class='tt-anzahl'>– = noch kein veröffentlichtes Resultat. Gleiche Punktzahl ergibt "
+                 "den gleichen Rang. Turner antippen für Details; T = Linienpunkte.</div>")
     _html(teile)
 
 
