@@ -14,7 +14,9 @@ Adressen:
 Statische Live-Ansicht (optional, Secret `live_url`, z. B. `https://stv-sev.github.io/testtag-public/`): Ist sie
 hinterlegt, führt „Live“ bei nicht archivierten Testtagen auf `live_url?t=<slug>`; Streamlit zeigt dann nur
 Ranglisten, Startliste und Zeitplan und lädt für den Live-Hinweis keine Daten. Ohne `live_url` bleibt alles wie
-bisher (Rückfall: Secret entfernen).
+bisher (Rückfall: Secret entfernen). Zusätzlich `statische_rangliste = true`: auch „Ranglisten“ führt auf die statische
+Seite (`live_url?t=<slug>&ansicht=rangliste`); Streamlit zeigt dann nur Startliste und Zeitplan. Ohne diesen Schalter
+bleiben die Ranglisten hier (Rückfall nur der Rangliste).
 
 Ein Testtag zeigt beide Programme (AK5–AK9+, AK9–AK12) in vier Bereichen: Live, Ranglisten, Startliste,
 Zeitplan. Nur Testtage mit Status `live` aktualisieren sich etwa alle 5 Sekunden (`st.fragment`).
@@ -308,12 +310,24 @@ def live_link(testtag) -> str | None:
     return f"{basis}?t={urllib.parse.quote(testtag.slug, safe='')}"
 
 
+def statische_links(testtag) -> dict[str, str]:
+    """Bereiche dieses Testtags auf der statischen Seite → Link (leer: alles in Streamlit)."""
+    link = live_link(testtag)
+    if link is None:
+        return {}
+    try:
+        rangliste = st.secrets.get("statische_rangliste", False) is True
+    except Exception:
+        rangliste = False
+    return {q.LIVE: link, **({q.RANGLISTE: f"{link}&ansicht=rangliste"} if rangliste else {})}
+
+
 def _live_pille(link: str, text: str = "⚡ Live") -> str:
     return f"<a class='tt-pille' href='{_h(link)}' target='_self'>{_h(text)}</a>"
 
 
-def _bereiche(link: str | None) -> list[str]:
-    return [b for b in q.BEREICHE if not (link and b == q.LIVE)]
+def _bereiche(links: dict[str, str]) -> list[str]:
+    return [b for b in q.BEREICHE if b not in links]
 
 
 def _bereich_aus_adresse(bereiche: list[str]) -> None:
@@ -351,7 +365,7 @@ def uebersicht(zugang) -> None:
         for testtag in gruppe:
             st.button(testtag.titel, key=f"oeffnen|{testtag.slug}", on_click=_oeffnen, args=(testtag.slug,),
                       width="stretch")
-            link = live_link(testtag)
+            link = statische_links(testtag).get(q.LIVE)
             _html([f"<div class='tt-meta'>{_badge(status)} &nbsp;Stand "
                    f"{_h(q.zeit_text(testtag.stand_am, mit_datum=True))} · Adresse ?t={_h(testtag.slug)}"
                    f"{_live_pille(link, '⚡ Live-Resultate') if link else ''}</div>"])
@@ -658,22 +672,27 @@ def _zeitplan(stand) -> None:
 ANSICHTEN = {q.LIVE: _live, q.RANGLISTE: _ranglisten, q.STARTLISTE: _startliste, q.ZEITPLAN: _zeitplan}
 
 
-def navigation(bereiche: list[str], link: str | None):
-    """Bereichspillen; mit statischer Live-Ansicht ist „Live“ ein Link in derselben Zeile (nichts gewählt = Live)."""
+def navigation(bereiche: list[str], links: dict[str, str]):
+    """Bereichspillen; Bereiche der statischen Seite sind Links in derselben Zeile (nichts gewählt = statisch)."""
     with st.container(horizontal=True, key="nav"):
-        if link:
-            _html([_live_pille(link)])
-        return st.radio("Bereich", bereiche, index=None if link else 0, horizontal=True, key="bereich",
+        for bereich, link in links.items():
+            _html([_live_pille(link, NAV_TEXT[bereich])])
+        return st.radio("Bereich", bereiche, index=None if links else 0, horizontal=True, key="bereich",
                         label_visibility="collapsed", format_func=lambda b: NAV_TEXT[b], on_change=_ansicht_merken)
 
 
-def live_verweis(link: str) -> None:
-    """Live liegt auf der statischen Seite: kein Datenabruf, keine Personendaten, nur der Weg dorthin."""
-    _html(["<div class='tt-verweis'>Die Live-Resultate werden auf einer eigenen, schnellen Seite angezeigt.<br>",
-           _live_pille(link, "⚡ Live-Resultate öffnen"), "</div>"])
+def live_verweis(links: dict[str, str]) -> None:
+    """Bereich liegt auf der statischen Seite: kein Datenabruf, keine Personendaten, nur der Weg dorthin."""
+    gewuenscht = PARAM_ANSICHT.get(str(st.query_params.get("ansicht", "") or "").strip())
+    if gewuenscht == q.RANGLISTE and q.RANGLISTE in links:
+        text, link, knopf = "Die Ranglisten werden", links[q.RANGLISTE], "🏅 Ranglisten öffnen"
+    else:
+        text, link, knopf = "Die Live-Resultate werden", links[q.LIVE], "⚡ Live-Resultate öffnen"
+    _html([f"<div class='tt-verweis'>{text} auf einer eigenen, schnellen Seite angezeigt.<br>",
+           _live_pille(link, knopf), "</div>"])
 
 
-def testtag_ansicht(zugang, testtag, link: str | None = None) -> None:
+def testtag_ansicht(zugang, testtag, links: dict[str, str] | None = None) -> None:
     """Lädt (Live: bei jedem Takt) und zeichnet den Testtag aus dem letzten gültigen Stand."""
     stand_key, fehler_key = _schluessel(testtag)
     if not aktualisieren(zugang, testtag):
@@ -685,9 +704,10 @@ def testtag_ansicht(zugang, testtag, link: str | None = None) -> None:
         st.error(NICHT_VERFUEGBAR)
         return
     _stand_zeile(testtag, stand, fehler)
-    bereich = navigation(_bereiche(link), link)
-    if bereich is None:  # nur mit statischer Live-Ansicht möglich
-        live_verweis(link)
+    links = links or {}
+    bereich = navigation(_bereiche(links), links)
+    if bereich is None:  # nur mit statischer Seite möglich
+        live_verweis(links)
         return
     ANSICHTEN[bereich](stand)
 
@@ -727,19 +747,19 @@ def zeichne() -> None:
         st.query_params["t"] = testtag.slug
     titel, text = status_text(testtag.status)
     kopfband(testtag.titel, badge=_badge(testtag.status, f"{titel} – {text}"))
-    link = live_link(testtag)
-    bereiche = _bereiche(link)
+    links = statische_links(testtag)
+    bereiche = _bereiche(links)
     _bereich_aus_adresse(bereiche)
-    if link and st.session_state.get("bereich") not in bereiche:  # Live auf der statischen Seite: nichts laden
-        navigation(bereiche, link)
-        live_verweis(link)
+    if links and st.session_state.get("bereich") not in bereiche:  # Bereich auf der statischen Seite: nichts laden
+        navigation(bereiche, links)
+        live_verweis(links)
         fuss()
         return
     takt = takt_fuer(testtag.status)
     if takt:
-        st.fragment(run_every=takt)(testtag_ansicht)(zugang, testtag, link)
+        st.fragment(run_every=takt)(testtag_ansicht)(zugang, testtag, links)
     else:
-        testtag_ansicht(zugang, testtag, link)
+        testtag_ansicht(zugang, testtag, links)
     fuss()
 
 

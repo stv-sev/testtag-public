@@ -20,8 +20,8 @@
   <div class="tt-stand" id="stand"></div>
   <div class="tt-warnung" id="warnung" role="status" hidden></div>
   <nav class="tt-nav" id="nav" hidden>
-    <span class="tt-pille aktiv">⚡ Live</span>
-    <a class="tt-pille" data-ziel="rangliste" href="#">🏅 Ranglisten</a>
+    <a class="tt-pille aktiv" data-ansicht="live" href="#" aria-current="page">⚡ Live</a>
+    <a class="tt-pille" data-ansicht="rangliste" href="#">🏅 Ranglisten</a>
     <a class="tt-pille" data-ziel="startliste" href="#">📋 Startliste</a>
     <a class="tt-pille" data-ziel="zeitplan" href="#">🕐 Zeitplan</a>
   </nav>
@@ -29,12 +29,19 @@
     <label>Programm<select id="programm"></select></label>
     <label>Altersklasse<select id="ak"></select></label>
   </div>
+  <div class="tt-arten" id="arten" role="radiogroup" aria-labelledby="arten-titel" hidden>
+    <span class="tt-arten-titel" id="arten-titel">Rangliste</span>
+    <button type="button" role="radio" data-art="gesamt" aria-checked="true">Gesamt</button>
+    <button type="button" role="radio" data-art="technik" aria-checked="false">Technik</button>
+    <button type="button" role="radio" data-art="athletik" aria-checked="false">Athletik</button>
+  </div>
   <div class="tt-hinweise" id="hinweise"></div>
   <div id="inhalt"><div class="tt-leer">Wird geladen …</div></div>
   <footer class="tt-fuss">Öffentliche Ansicht – nur lesend. Noch nicht freigegebene Rotationen sind nicht
     enthalten.<br>Turnsport Aargau · Testtag</footer>
 </main>
 <script src="config.js"></script>
+<script src="rangliste.js"></script>
 <script src="live.js"></script>
 </body>
 </html>

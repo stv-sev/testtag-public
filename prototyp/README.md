@@ -1,11 +1,12 @@
 # Prototyp: statische Live-Ansicht (Branch `prototyp-live-statisch`)
 
-Ziel: 50 gleichzeitige Zuschauer der Live-Ansicht zuverlässig bedienen, ohne Streamlit-Prozess je Zuschauer.
-Rangliste, Startliste, Zeitplan und Archiv bleiben in Streamlit (Links auf `testtag.streamlit.app/?t=<slug>&ansicht=…`).
-Navigation, Ansichtswechsel-Messung, Umschalt- und Rückfallablauf: [UMSTELLUNG.md](UMSTELLUNG.md).
+Ziel: 50 gleichzeitige Zuschauer zuverlässig bedienen, ohne Streamlit-Prozess je Zuschauer. Auf dem Branch
+`umstellung-live-statisch` zeigt die Seite **Live und Ranglisten**; Startliste, Zeitplan und Archiv bleiben in
+Streamlit (Links auf `testtag.streamlit.app/?t=<slug>&ansicht=…`). Navigation, statische Rangliste, Messungen,
+Umschalt- und Rückfallablauf: [UMSTELLUNG.md](UMSTELLUNG.md). Die Abschnitte unten beschreiben den Live-Prototyp.
 `main`, die Streamlit-App, der Publisher, die Excel-Mappen, das Schema und die RLS-Regeln sind unverändert.
 
-- **Seite:** `docs/` (index.html, live.css, live.js, config.js, logo.png), keine Abhängigkeiten, kein Build.
+- **Seite:** `docs/` (index.html, live.css, live.js, rangliste.js, config.js, logo.png), keine Abhängigkeiten, kein Build.
 - **Hosting:** GitHub Pages aus diesem Branch, Ordner `/docs` → <https://stv-sev.github.io/testtag-public/?t=<slug>>.
   Kostenlos für öffentliche Repositories; einmalig eingeschaltet unter Settings → Pages. Dateien werden 10 min
   zwischengespeichert (`Cache-Control: max-age=600`).
@@ -100,3 +101,8 @@ je 3 s): ≈ 0,15 GB je 8-h-Tag, da der Server die Daten für alle Zuschauer ein
 - `lasttest.mjs` – N Zuschauer, Protokoll je Anzeige/Request. `auswerten.py` – Kennzahlen.
 - `publikationstakt.py` – synthetische Publikation alle 30 s (nur `systemtest-last-…`, Schreibschutz).
 - `pruefsumme_test.mjs` – Prüfsummen-Portierung gegen echte Zeilen.
+- `rangliste_daten.py` – synthetische Stände und erwartete Streamlit-Darstellung; `rangliste_test.mjs` – Rangliste
+  gegen nachgebildete Data API (Vergleich, Korrektur, Unterbruch, verborgen, Archiv, Schalter).
+- `navigation_test.mjs`, `rueckfall_test.mjs` – Wege zwischen statischer Seite und Streamlit, Rückfall.
+- `wechsel_statisch.mjs` + `wechsel_statisch_auswerten.py` – 50 Zuschauer wechseln Live → Rangliste (statisch).
+- `streamlit_wechsel.py` + `wechsel_auswerten.py` – dasselbe in Streamlit (Rangliste, Startliste oder Zeitplan).

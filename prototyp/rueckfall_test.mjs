@@ -1,6 +1,8 @@
-// Rückfalltest: statische Seite mit `rueckfall: true` und Streamlit ohne Secret `live_url` (nur lesend).
+// Rückfalltest: statische Seite mit `rueckfall: true` und Streamlit ohne Secrets `live_url`/`statische_rangliste`
+// (nur lesend).
 //   node rueckfall_test.mjs <statisch-url> <streamlit-url> <slug> <chromium-exe>
-// Erwartet: Umleitung vor jedem Supabase-Abruf auf Streamlit ?t=<slug>&ansicht=live, dort Live wie bisher.
+// Erwartet: Umleitung vor jedem Supabase-Abruf auf Streamlit ?t=<slug>&ansicht=live (bzw. rangliste), dort die
+// Ansicht wie bisher.
 import { chromium } from "playwright-core";
 
 const [statisch, streamlit, slug, exe] = process.argv.slice(2);
@@ -13,7 +15,9 @@ const vonStatisch = [];
 page.on("request", (r) => {
   if (r.url().includes("supabase.co") && page.url().startsWith(statisch.replace(/\/+$/, ""))) vonStatisch.push(r.url());
 });
-for (const [weg, ziel] of [[`?t=${slug}&p=AK5-AK9%2B`, `?t=${slug}&ansicht=live`], ["", ""], ["?t=x%26y", ""]]) {
+for (const [weg, ziel, bereich, sel] of [[`?t=${slug}&p=AK5-AK9%2B`, `?t=${slug}&ansicht=live`, "Live", ".tt-karte"],
+  [`?t=${slug}&ansicht=rangliste&p=AK5-AK9%2B&art=technik`, `?t=${slug}&ansicht=rangliste`, "Ranglisten", ".tt-rangkarte"],
+  ["", ""], ["?t=x%26y", ""]]) {
   vonStatisch.length = 0;
   await page.goto(`${statisch.replace(/\/+$/, "")}/${weg}`);
   await page.waitForURL((u) => u.href.startsWith(streamlit), { timeout: 30000 });
@@ -22,9 +26,9 @@ for (const [weg, ziel] of [[`?t=${slug}&p=AK5-AK9%2B`, `?t=${slug}&ansicht=live`
   pruefe(new URL(page.url()).search === new URL(soll).search, `Umleitung ${weg || "(ohne Testtag)"} → ${page.url()}`);
   pruefe(vonStatisch.length === 0, "kein Supabase-Abruf der statischen Seite vor der Umleitung");
   if (ziel) {
-    await page.waitForSelector(".tt-karte", { timeout: 60000 });
-    pruefe((await page.locator(".st-key-bereich label:has(input:checked)").textContent()).includes("Live"),
-      "Streamlit zeigt Live wie bisher");
+    await page.waitForSelector(sel, { timeout: 60000 });
+    pruefe((await page.locator(".st-key-bereich label:has(input:checked)").textContent()).includes(bereich),
+      `Streamlit zeigt ${bereich} wie bisher`);
     pruefe(await page.locator(".st-key-nav a.tt-pille, .tt-verweis").count() === 0, "kein Link zurück auf die statische Seite");
   }
 }

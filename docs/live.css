@@ -1,4 +1,4 @@
-/* Gestaltung wie app.py (STIL): Dunkelblau #0D4E73 · Blau #15608A · Mittelblau #2C7FA6 · Hellblau #6FAFC9 ·
+/* Gestaltung wie app.py (STIL; Ranglistenteil unverändert übernommen): Dunkelblau #0D4E73 · Blau #15608A · Mittelblau #2C7FA6 · Hellblau #6FAFC9 ·
    Fläche #D6EAF3 · Magenta #E6007E. Bewusst hell wie die Streamlit-App (gleiches Erscheinungsbild). */
 :root { color-scheme: light; }
 * { box-sizing: border-box; }
@@ -56,10 +56,43 @@ body { margin: 0; background: #fff; color: #0D4E73; font-family: "Source Sans Pr
 .tt-chip { background: #D6EAF3; color: #2C7FA6; border-radius: 4px; padding: 2px 6px; font-size: .72rem;
            font-weight: 500; }
 .tt-chip.tt-end { background: #0D4E73; color: #fff; font-weight: 700; }
+/* Rangliste (wie app.py) */
+.tt-arten { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 12px; }
+.tt-arten-titel { flex-basis: 100%; font-size: .875rem; color: #0D4E73; }
+.tt-arten button { font: inherit; font-size: .875rem; min-height: 40px; padding: 7px 14px; border: 0; border-radius: 20px;
+                   background: #D6EAF3; color: #0D4E73; cursor: pointer; }
+.tt-arten button[aria-checked="true"] { background: #0D4E73; color: #fff; font-weight: 700; }
+.tt-arten button:focus-visible, .tt-pille:focus-visible { outline: 2px solid #6FAFC9; outline-offset: 2px; }
+.tt-rang { border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700;
+           flex-shrink: 0; width: 30px; height: 30px; background: #D6EAF3; color: #0D4E73; font-size: .82rem; }
+.tt-karte details > summary { list-style: none; cursor: pointer; }
+.tt-karte details > summary::-webkit-details-marker { display: none; }
+.tt-pfeil { font-style: normal; color: #6FAFC9; font-size: .8rem; flex-shrink: 0; transition: transform .15s; }
+.tt-karte details[open] > summary .tt-pfeil { transform: rotate(180deg); }
+.tt-details { margin: 8px 0 2px 42px; font-size: .8rem; color: #15608A; }
+.tt-dtitel { font-size: .7rem; font-weight: 700; color: #2C7FA6; text-transform: uppercase; letter-spacing: .04em;
+             margin: 8px 0 2px; }
+.tt-dz, .tt-geraet > summary, .tt-linie { display: flex; align-items: baseline; gap: 8px; padding: 4px 0;
+                                         border-bottom: 1px solid #f2f2f2; }
+.tt-dz span, .tt-geraet > summary span, .tt-linie > span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.tt-dz b, .tt-geraet > summary b { color: #0D4E73; flex-shrink: 0; }
+.tt-dz.tt-total { font-weight: 600; }
+.tt-dz.tt-haupt { background: #0D4E73; color: #fff; border-radius: 4px; padding: 4px 8px; margin-top: 4px; }
+.tt-dz.tt-haupt b { color: #fff; }
+.tt-geraet > summary i { font-style: normal; color: #6FAFC9; font-size: .75rem; width: 1em; text-align: center;
+                         flex-shrink: 0; }
+.tt-geraet > summary i::before { content: "▸"; }
+.tt-geraet[open] > summary i::before { content: "▾"; }
+.tt-linien { padding: 0 0 4px 10px; background: #F6FAFC; }
+.tt-linie { font-size: .76rem; color: #4A6A80; }
+.tt-st { flex-shrink: 0; min-width: 3.6em; text-align: right; }
+.tt-linie b.tt-st { color: #0D4E73; }
+.tt-dhinweis { color: #888; font-size: .76rem; padding: 4px 0; }
 .tt-leer { text-align: center; padding: 28px 12px; color: #9aa7b0; font-size: .88rem; }
 .tt-fuss { text-align: center; font-size: .7rem; color: #aaa; margin-top: 18px; padding-bottom: 12px; }
 @media (max-width: 640px) {
   .tt-chips { padding-left: 0; }
+  .tt-details { margin-left: 0; }
   .tt-pille { padding: 7px 9px; font-size: .8rem; }
   .tt-nav { gap: 4px; }
   .tt-filter { gap: 10px; }

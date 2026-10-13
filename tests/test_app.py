@@ -60,13 +60,15 @@ class AppTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def app(self, t: str | None = None, secrets: dict | None = None, ansicht: str | None = None,
-            live_url: str | None = None) -> AppTest:
+            live_url: str | None = None, statische_rangliste=None) -> AppTest:
         at = AppTest.from_file(APP, default_timeout=60)
         for key, value in (secrets or {"supabase_url": "https://example-ref.supabase.co",
                                        "supabase_publishable_key": TEST_PUBLISHABLE_KEY}).items():
             at.secrets[key] = value
         if live_url is not None:
             at.secrets["live_url"] = live_url
+        if statische_rangliste is not None:
+            at.secrets["statische_rangliste"] = statische_rangliste
         if t:
             at.query_params["t"] = t
         if ansicht:
@@ -229,6 +231,36 @@ class AppTests(unittest.TestCase):
         at = self.app(TT_SLUG, ansicht="startliste", live_url=basis.rstrip("/"))
         self.assertEqual(at.radio(key="bereich").value, q.STARTLISTE)
         self.assertIn(f"href='{basis}?t={TT_SLUG}'", self.roh(at))
+
+    def test_static_ranking_link_replaces_ranking_area_without_loading_data(self):
+        basis = "https://stv-sev.github.io/testtag-public/"
+        live, rangliste = f"href='{basis}?t={TT_SLUG}'", f"href='{basis}?t={TT_SLUG}&amp;ansicht=rangliste'"
+        at = self.app(TT_SLUG, ansicht="rangliste", live_url=basis, statische_rangliste=True)
+        roh = self.roh(at)
+        self.assertIn(live, roh)
+        self.assertIn(rangliste, roh)
+        self.assertIn("🏅 Ranglisten öffnen", self.text(at))
+        radio = at.radio(key="bereich")
+        self.assertEqual(radio.options, NAV[2:])
+        self.assertIsNone(radio.value)
+        self.assertEqual(self.raenge(at), [])
+        self.assertEqual(sum("/veroeffentlichung?" in c["url"] for c in self.api.calls), 0)  # nur der Testtag
+        self.assert_clean(at)
+        at = self.app(TT_SLUG, live_url=basis, statische_rangliste=True)
+        self.assertIn("⚡ Live-Resultate öffnen", self.text(at))
+        self.go(at, q.STARTLISTE)
+        self.assertEqual(at.query_params["ansicht"], ["startliste"])
+        self.assertIn(rangliste, self.roh(at))  # beide Pillen bleiben in der Navigation
+        at = self.app(ARCHIV_SLUG, ansicht="rangliste", live_url=basis, statische_rangliste=True)
+        self.assertEqual(at.radio(key="bereich").value, q.RANGLISTE)  # Archiv bleibt vollständig hier
+        self.assertTrue(self.raenge(at))
+        self.assertNotIn(basis, self.roh(at))
+        for live_url, schalter in ((None, True), (basis, "true"), (basis, False)):
+            with self.subTest(live_url=live_url, schalter=schalter):  # ohne live_url oder ohne true: Rangliste hier
+                at = self.app(TT_SLUG, ansicht="rangliste", live_url=live_url, statische_rangliste=schalter)
+                self.assertEqual(at.radio(key="bereich").value, q.RANGLISTE)
+                self.assertTrue(self.raenge(at))
+                self.assertNotIn("ansicht=rangliste'", self.roh(at))
 
     def test_static_live_link_in_overview_but_archive_stays_in_streamlit(self):
         basis = "https://stv-sev.github.io/testtag-public/"

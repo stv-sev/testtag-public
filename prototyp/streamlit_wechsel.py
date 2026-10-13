@@ -1,6 +1,6 @@
 """Lastmessung Ansichtswechsel: N Zuschauer wechseln gleichzeitig von Live zur Rangliste in Streamlit (ohne Browser).
 
-    python -B streamlit_wechsel.py <ws-url> <slug> <anzahl> <sekunden> <log> [staffel_s=0.05]
+    python -B streamlit_wechsel.py <ws-url> <slug> <anzahl> <sekunden> <log> [staffel_s=0.05] [rangliste|startliste|zeitplan]
 
 Jede Sitzung verbindet sich wie ein Browser, der einen Link aus der statischen Live-Ansicht öffnet
 (`?t=<slug>&ansicht=rangliste`): zuerst die Seite per HTTP (Streamlit Cloud setzt dabei über Weiterleitungen das
@@ -27,9 +27,14 @@ from streamlit.proto.ForwardMsg_pb2 import ForwardMsg
 
 URL, SLUG, N, DAUER, LOG = sys.argv[1], sys.argv[2], int(sys.argv[3]), float(sys.argv[4]), Path(sys.argv[5])
 STAFFEL = float(sys.argv[6]) if len(sys.argv) > 6 else 0.05
+ANSICHT = sys.argv[7] if len(sys.argv) > 7 else "rangliste"
 ORIGIN = re.sub(r"^ws", "http", URL.split("/~/")[0].split("/_stcore")[0])
-ABFRAGE = f"t={SLUG}&ansicht=rangliste"
-ZIEL = "🏅 Ranglisten"
+ABFRAGE = f"t={SLUG}&ansicht={ANSICHT}"
+# Zielbereich: Beschriftung der Pille und Kennzeichen des gezeichneten Inhalts
+# (genaues Markup, nicht nur der Klassenname – der steht auch im Stilblock)
+ZIEL, MARKE = {"rangliste": ("🏅 Ranglisten", "tt-liste tt-rangliste"),
+               "startliste": ("📋 Startliste", "<table class='tt-startliste'>"),
+               "zeitplan": ("🕐 Zeitplan", "<div class='tt-tabelle tt-zeitplan'>")}[ANSICHT]
 _f = LOG.open("a", encoding="utf-8")
 
 
@@ -85,7 +90,7 @@ async def sitzung(nr: int, ende: float):
         try:
             await ws.send(nachricht())
             while time.time() < ende:
-                if not laeuft and radio_id and not gewaehlt:  # Klick auf „Ranglisten“
+                if not laeuft and radio_id and not gewaehlt:  # Klick auf den Zielbereich
                     await ws.send(nachricht(radio_id, fragment))
                     gewaehlt, gesendet, laeuft = True, time.time(), True
                     protokoll(art="klick", sitzung=nr)
@@ -122,10 +127,10 @@ async def sitzung(nr: int, ende: float):
                     if typ == "radio" and "bereich" in el.radio.id:
                         radio_id = el.radio.id
                         wert = el.radio.options[el.radio.default] if el.radio.default < len(el.radio.options) else ""
-                        if "Ranglisten" in (el.radio.raw_value or wert) and not gewaehlt:
+                        if ZIEL.split(" ", 1)[1] in (el.radio.raw_value or wert) and not gewaehlt:
                             gewaehlt = True  # App kennt &ansicht=: kein Klick nötig
                             protokoll(art="adresse_wirkt", sitzung=nr)
-                    elif typ == "markdown" and "tt-liste tt-rangliste" in el.markdown.body:
+                    elif typ == "markdown" and MARKE in el.markdown.body:
                         h = hashlib.sha256(el.markdown.body.encode()).hexdigest()
                         if h != letzt:
                             protokoll(art="aenderung" if letzt else "erstanzeige", sitzung=nr,
