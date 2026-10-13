@@ -71,7 +71,9 @@
     const key = String(c.publishableKey || "");
     if (url.protocol !== "https:" || (url.pathname !== "/" && url.pathname !== "") || url.search || url.username
         || !key.startsWith("sb_publishable_") || key.length <= 15 || /\s/.test(key)) return null;
-    return { basis: url.origin, key, streamlit: String(c.streamlitUrl || "").replace(/\/+$/, "") };
+    const streamlit = String(c.streamlitUrl || "").replace(/\/+$/, "");
+    return { basis: url.origin, key, streamlit: /^(https:\/\/[^/?#@]+|http:\/\/(localhost|127\.0\.0\.1)(:\d+)?)$/.test(streamlit) ? streamlit : "",
+      rueckfall: c.rueckfall === true };
   }
 
   async function hole(z, tabelle, parameter) {
@@ -285,8 +287,10 @@
   }
 
   // ── Darstellung ───────────────────────────────────────────────────────────────────────────────────
-  function streamlitLink() {
-    return z && z.streamlit ? `${z.streamlit}/?t=${encodeURIComponent(slug)}` : "#";
+  // Bereiche in Streamlit desselben Testtags (`&ansicht=`); Programm/AK kennt die Streamlit-Adresse nicht.
+  function streamlitLink(ansicht) {
+    if (!z || !z.streamlit) return "#";
+    return `${z.streamlit}/?t=${encodeURIComponent(slug)}${ansicht ? `&ansicht=${encodeURIComponent(ansicht)}` : ""}`;
   }
 
   function badge(status) {
@@ -432,7 +436,11 @@
 
   // ── Start ─────────────────────────────────────────────────────────────────────────────────────────
   if (z && z.streamlit) el.zurueck.href = `${z.streamlit}/`;
-  for (const a of document.querySelectorAll("[data-ziel]")) a.href = streamlitLink();
+  for (const a of document.querySelectorAll("[data-ziel]")) a.href = streamlitLink(a.dataset.ziel);
+  if (z && z.rueckfall && z.streamlit) {  // Rückfall: bisherige Anzeige in Streamlit, vor jedem Datenabruf
+    location.replace(slug && SLUG.test(slug) ? streamlitLink("live") : `${z.streamlit}/`);
+    return;
+  }
   if (!z) {
     el.zurueck.hidden = true;
     el.inhalt.innerHTML = "<div class='tt-leer'>Für diese Ansicht ist noch kein Zugang hinterlegt.</div>";

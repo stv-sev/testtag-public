@@ -3,12 +3,12 @@
 :root { color-scheme: light; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; background: #fff; color: #31333F; font-family: "Source Sans Pro", "Source Sans 3", system-ui,
+body { margin: 0; background: #fff; color: #0D4E73; font-family: "Source Sans Pro", "Source Sans 3", system-ui,
        -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 16px; line-height: 1.5; }
 .tt-seite { max-width: 760px; margin: 0 auto; padding: 1.5rem 16px 2rem; }
 .tt-zurueck { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; margin-bottom: 12px;
-              border: 1px solid rgba(49,51,63,.2); border-radius: 20px; color: #31333F; text-decoration: none;
-              font-size: .9rem; }
+              border: 1px solid rgba(13,78,115,.2); border-radius: 20px; color: #0D4E73; text-decoration: none;
+              font-size: .875rem; }
 .tt-zurueck:hover { border-color: #E6007E; color: #E6007E; }
 .tt-kopf { background: linear-gradient(135deg, #0D4E73, #15608A); border-bottom: 3px solid #E6007E;
            border-radius: 12px; padding: 16px; display: flex; flex-direction: column; align-items: center;
@@ -33,9 +33,9 @@ body { margin: 0; background: #fff; color: #31333F; font-family: "Source Sans Pr
 .tt-pille.aktiv { background: #0D4E73; color: #fff; font-weight: 700; }
 .tt-pille:not(.aktiv):hover { box-shadow: 0 1px 6px rgba(0,0,0,.12); }
 .tt-filter { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 0 0 10px; }
-.tt-filter label { display: flex; flex-direction: column; gap: 4px; font-size: .875rem; color: #31333F; min-width: 0; }
-.tt-filter select { font: inherit; font-size: 1rem; min-height: 40px; padding: 6px 10px; border-radius: 8px;
-                    border: 1px solid #F0F2F6; background: #F0F2F6; color: #31333F; width: 100%; }
+.tt-filter label { display: flex; flex-direction: column; gap: 4px; font-size: .875rem; color: #0D4E73; min-width: 0; }
+.tt-filter select { font: inherit; font-size: .875rem; min-height: 40px; padding: 6px 10px; border-radius: 8px;
+                    border: 1px solid #D6EAF3; background: #D6EAF3; color: #0D4E73; width: 100%; }
 .tt-filter select:focus { outline: 2px solid #6FAFC9; }
 .tt-hinweise { font-size: .75rem; color: #15608A; margin: 0 0 4px; }
 .tt-hinweise div { margin: 2px 0; }

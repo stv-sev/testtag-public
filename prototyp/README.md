@@ -1,7 +1,8 @@
 # Prototyp: statische Live-Ansicht (Branch `prototyp-live-statisch`)
 
 Ziel: 50 gleichzeitige Zuschauer der Live-Ansicht zuverlässig bedienen, ohne Streamlit-Prozess je Zuschauer.
-Rangliste, Startliste, Zeitplan und Archiv bleiben in Streamlit (Links auf `testtag.streamlit.app/?t=<slug>`).
+Rangliste, Startliste, Zeitplan und Archiv bleiben in Streamlit (Links auf `testtag.streamlit.app/?t=<slug>&ansicht=…`).
+Navigation, Ansichtswechsel-Messung, Umschalt- und Rückfallablauf: [UMSTELLUNG.md](UMSTELLUNG.md).
 `main`, die Streamlit-App, der Publisher, die Excel-Mappen, das Schema und die RLS-Regeln sind unverändert.
 
 - **Seite:** `docs/` (index.html, live.css, live.js, config.js, logo.png), keine Abhängigkeiten, kein Build.

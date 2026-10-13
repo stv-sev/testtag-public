@@ -7,7 +7,14 @@ Liest ausschliesslich über `quelle.py` mit dem Publishable Key (Streamlit-Secre
 Adressen:
 - ohne Parameter: Übersicht aller öffentlichen Testtage (Live, Vorbereitet, Archiv);
 - `?t=<slug>`: Testtag über seinen öffentlichen Slug (bevorzugt);
-- `?t=<uuid>`: ältere Links mit der Testtag-UUID werden weiterhin aufgelöst und auf den Slug umgestellt.
+- `?t=<uuid>`: ältere Links mit der Testtag-UUID werden weiterhin aufgelöst und auf den Slug umgestellt;
+- `&ansicht=live|rangliste|startliste|zeitplan`: öffnet diesen Bereich (Links aus der statischen Live-Ansicht);
+  ein Bereichswechsel schreibt ihn in die Adresse. Filter (Programm, AK) stehen bewusst nicht in der Adresse.
+
+Statische Live-Ansicht (optional, Secret `live_url`, z. B. `https://stv-sev.github.io/testtag-public/`): Ist sie
+hinterlegt, führt „Live“ bei nicht archivierten Testtagen auf `live_url?t=<slug>`; Streamlit zeigt dann nur
+Ranglisten, Startliste und Zeitplan und lädt für den Live-Hinweis keine Daten. Ohne `live_url` bleibt alles wie
+bisher (Rückfall: Secret entfernen).
 
 Ein Testtag zeigt beide Programme (AK5–AK9+, AK9–AK12) in vier Bereichen: Live, Ranglisten, Startliste,
 Zeitplan. Nur Testtage mit Status `live` aktualisieren sich etwa alle 5 Sekunden (`st.fragment`).
@@ -31,6 +38,7 @@ from __future__ import annotations
 import base64
 import html
 import time
+import urllib.parse
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -49,6 +57,8 @@ ROBOTS = '<meta name="robots" content="noindex, nofollow">'
 NICHT_VERFUEGBAR = "Die Daten dieses Testtags sind zurzeit nicht verfügbar. Bitte später erneut versuchen."
 VERALTET = "Aktualisierung vorübergehend nicht möglich – letzter gültiger Stand wird angezeigt"
 WARTET = "Die Daten sind zurzeit nicht erreichbar. Die Seite versucht es automatisch erneut."
+ANSICHT_PARAM = {q.LIVE: "live", q.RANGLISTE: "rangliste", q.STARTLISTE: "startliste", q.ZEITPLAN: "zeitplan"}
+PARAM_ANSICHT = {wert: bereich for bereich, wert in ANSICHT_PARAM.items()}
 NAV_TEXT = {q.LIVE: "⚡ Live", q.RANGLISTE: "🏅 Ranglisten", q.STARTLISTE: "📋 Startliste", q.ZEITPLAN: "🕐 Zeitplan"}
 STATUS_BADGE = {"live": ("live", "LIVE"), "vorbereitet": ("demnaechst", "Demnächst"), "archiviert": ("archiv", "Archiv")}
 RANG_FARBE = {1: "#FFD700", 2: "#C0C0C0", 3: "#CD7F32"}
@@ -157,12 +167,27 @@ STIL = """
 [class*="st-key-oeffnen-"] button p { color: #0D4E73; font-weight: 700; font-size: 0.95rem; text-align: left; }
 [class*="st-key-oeffnen-"] button:hover { box-shadow: 0 2px 12px rgba(0,0,0,.12); border: none; }
 .st-key-zurueck button { border-radius: 20px; min-height: 40px; }
+/* Statische Live-Ansicht: Link als Pille in derselben Zeile wie die Bereiche */
+.st-key-nav { gap: 6px; flex-wrap: wrap; align-items: center; }
+.st-key-nav > div { width: auto !important; flex: 0 0 auto; }
+.st-key-nav > .st-key-bereich, .st-key-nav .stRadio, .st-key-nav [role="radiogroup"] { display: contents; }
+.st-key-bereich [role="radiogroup"] > label p { font-size: 0.9rem !important; }
+.st-key-bereich [role="radiogroup"] > label > div:last-child { padding-left: 0; }
+a.tt-pille { display: inline-flex; align-items: center; min-height: 40px; padding: 7px 14px; border-radius: 20px;
+             background: #D6EAF3; color: #0D4E73 !important; text-decoration: none !important; font-size: 0.9rem; }
+a.tt-pille:hover { box-shadow: 0 1px 6px rgba(0,0,0,.12); }
+.tt-meta a.tt-pille { min-height: 32px; padding: 3px 12px; margin-left: 6px; font-size: 0.8rem; }
+.tt-verweis { text-align: center; padding: 22px 12px; color: #15608A; font-size: 0.9rem; }
+.tt-verweis a.tt-pille { background: #0D4E73; color: #fff !important; font-weight: 700; margin-top: 10px; }
 @media (max-width: 640px) {
   .tt-chips { padding-left: 0; }
   .tt-details { margin-left: 0; }
   .tt-tabelle th, .tt-tabelle td { padding: 5px 6px; }
   .st-key-bereich [role="radiogroup"] > label { padding: 7px 9px; }
   .st-key-bereich [role="radiogroup"] { gap: 4px; }
+  .st-key-nav { gap: 4px; }
+  .st-key-nav a.tt-pille { padding: 7px 9px; font-size: 0.8rem; }
+  .st-key-bereich [role="radiogroup"] > label p { font-size: 0.8rem !important; }
 }
 </style>
 """
@@ -261,6 +286,51 @@ def _zur_uebersicht() -> None:
     st.query_params.clear()
 
 
+def _live_basis() -> str | None:
+    """Adresse der statischen Live-Ansicht (Secret `live_url`, https ohne Abfrage; http nur für localhost-Tests)
+    oder None: Live bleibt hier."""
+    try:
+        wert = str(st.secrets.get("live_url", "") or "").strip()
+    except Exception:  # keine Secrets: wie ohne live_url
+        return None
+    teile = urllib.parse.urlsplit(wert)
+    lokal = teile.scheme == "http" and teile.hostname in ("localhost", "127.0.0.1")
+    if (teile.scheme != "https" and not lokal) or not teile.netloc or teile.query or teile.fragment or teile.username:
+        return None
+    return wert if wert.endswith("/") else f"{wert}/"
+
+
+def live_link(testtag) -> str | None:
+    """Link auf die statische Live-Ansicht dieses Testtags; archivierte Testtage bleiben im Streamlit-Archiv."""
+    basis = _live_basis()
+    if basis is None or testtag.status == "archiviert":
+        return None
+    return f"{basis}?t={urllib.parse.quote(testtag.slug, safe='')}"
+
+
+def _live_pille(link: str, text: str = "⚡ Live") -> str:
+    return f"<a class='tt-pille' href='{_h(link)}' target='_self'>{_h(text)}</a>"
+
+
+def _bereiche(link: str | None) -> list[str]:
+    return [b for b in q.BEREICHE if not (link and b == q.LIVE)]
+
+
+def _bereich_aus_adresse(bereiche: list[str]) -> None:
+    """`&ansicht=` wählt den Bereich; ein unbekannter Wert (oder Live bei statischer Live-Ansicht) wählt keinen."""
+    gewuenscht = PARAM_ANSICHT.get(str(st.query_params.get("ansicht", "") or "").strip())
+    if gewuenscht in bereiche:
+        st.session_state["bereich"] = gewuenscht
+    elif "ansicht" in st.query_params or st.session_state.get("bereich") not in bereiche:
+        st.session_state.pop("bereich", None)
+
+
+def _ansicht_merken() -> None:
+    bereich = st.session_state.get("bereich")
+    if bereich in ANSICHT_PARAM:
+        st.query_params["ansicht"] = ANSICHT_PARAM[bereich]
+
+
 # ── Übersicht ────────────────────────────────────────────────────────────────────────────────────────
 
 def uebersicht(zugang) -> None:
@@ -281,8 +351,10 @@ def uebersicht(zugang) -> None:
         for testtag in gruppe:
             st.button(testtag.titel, key=f"oeffnen|{testtag.slug}", on_click=_oeffnen, args=(testtag.slug,),
                       width="stretch")
+            link = live_link(testtag)
             _html([f"<div class='tt-meta'>{_badge(status)} &nbsp;Stand "
-                   f"{_h(q.zeit_text(testtag.stand_am, mit_datum=True))} · Adresse ?t={_h(testtag.slug)}</div>"])
+                   f"{_h(q.zeit_text(testtag.stand_am, mit_datum=True))} · Adresse ?t={_h(testtag.slug)}"
+                   f"{_live_pille(link, '⚡ Live-Resultate') if link else ''}</div>"])
 
 
 # ── Laden mit letztem gültigem Stand ────────────────────────────────────────────────────────────────
@@ -586,7 +658,22 @@ def _zeitplan(stand) -> None:
 ANSICHTEN = {q.LIVE: _live, q.RANGLISTE: _ranglisten, q.STARTLISTE: _startliste, q.ZEITPLAN: _zeitplan}
 
 
-def testtag_ansicht(zugang, testtag) -> None:
+def navigation(bereiche: list[str], link: str | None):
+    """Bereichspillen; mit statischer Live-Ansicht ist „Live“ ein Link in derselben Zeile (nichts gewählt = Live)."""
+    with st.container(horizontal=True, key="nav"):
+        if link:
+            _html([_live_pille(link)])
+        return st.radio("Bereich", bereiche, index=None if link else 0, horizontal=True, key="bereich",
+                        label_visibility="collapsed", format_func=lambda b: NAV_TEXT[b], on_change=_ansicht_merken)
+
+
+def live_verweis(link: str) -> None:
+    """Live liegt auf der statischen Seite: kein Datenabruf, keine Personendaten, nur der Weg dorthin."""
+    _html(["<div class='tt-verweis'>Die Live-Resultate werden auf einer eigenen, schnellen Seite angezeigt.<br>",
+           _live_pille(link, "⚡ Live-Resultate öffnen"), "</div>"])
+
+
+def testtag_ansicht(zugang, testtag, link: str | None = None) -> None:
     """Lädt (Live: bei jedem Takt) und zeichnet den Testtag aus dem letzten gültigen Stand."""
     stand_key, fehler_key = _schluessel(testtag)
     if not aktualisieren(zugang, testtag):
@@ -598,8 +685,10 @@ def testtag_ansicht(zugang, testtag) -> None:
         st.error(NICHT_VERFUEGBAR)
         return
     _stand_zeile(testtag, stand, fehler)
-    bereich = st.radio("Bereich", q.BEREICHE, horizontal=True, key="bereich", label_visibility="collapsed",
-                       format_func=lambda b: NAV_TEXT[b])
+    bereich = navigation(_bereiche(link), link)
+    if bereich is None:  # nur mit statischer Live-Ansicht möglich
+        live_verweis(link)
+        return
     ANSICHTEN[bereich](stand)
 
 
@@ -638,11 +727,19 @@ def zeichne() -> None:
         st.query_params["t"] = testtag.slug
     titel, text = status_text(testtag.status)
     kopfband(testtag.titel, badge=_badge(testtag.status, f"{titel} – {text}"))
+    link = live_link(testtag)
+    bereiche = _bereiche(link)
+    _bereich_aus_adresse(bereiche)
+    if link and st.session_state.get("bereich") not in bereiche:  # Live auf der statischen Seite: nichts laden
+        navigation(bereiche, link)
+        live_verweis(link)
+        fuss()
+        return
     takt = takt_fuer(testtag.status)
     if takt:
-        st.fragment(run_every=takt)(testtag_ansicht)(zugang, testtag)
+        st.fragment(run_every=takt)(testtag_ansicht)(zugang, testtag, link)
     else:
-        testtag_ansicht(zugang, testtag)
+        testtag_ansicht(zugang, testtag, link)
     fuss()
 
 

@@ -59,13 +59,18 @@ class AppTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def app(self, t: str | None = None, secrets: dict | None = None) -> AppTest:
+    def app(self, t: str | None = None, secrets: dict | None = None, ansicht: str | None = None,
+            live_url: str | None = None) -> AppTest:
         at = AppTest.from_file(APP, default_timeout=60)
         for key, value in (secrets or {"supabase_url": "https://example-ref.supabase.co",
                                        "supabase_publishable_key": TEST_PUBLISHABLE_KEY}).items():
             at.secrets[key] = value
+        if live_url is not None:
+            at.secrets["live_url"] = live_url
         if t:
             at.query_params["t"] = t
+        if ansicht:
+            at.query_params["ansicht"] = ansicht
         at.run()
         self.assertEqual(len(at.exception), 0, [e.value for e in at.exception])
         return at
@@ -179,6 +184,88 @@ class AppTests(unittest.TestCase):
         for bereich in q.BEREICHE:
             self.go(at, bereich)
             self.assert_clean(at)
+
+    # ── Adresse mit Bereich und statische Live-Ansicht ──
+    def test_view_parameter_opens_area_and_area_change_is_written_to_address(self):
+        for wert, bereich in (("rangliste", q.RANGLISTE), ("startliste", q.STARTLISTE), ("zeitplan", q.ZEITPLAN),
+                              ("live", q.LIVE), ("unbekannt", q.LIVE), ("", q.LIVE)):
+            with self.subTest(ansicht=wert):
+                at = self.app(TT_SLUG, ansicht=wert)
+                self.assertEqual(at.radio(key="bereich").value, bereich)
+                self.assertNotIn("live_url", self.roh(at))
+                self.assert_clean(at)
+        at = self.app(TT_SLUG, ansicht="rangliste")
+        self.assertTrue(self.raenge(at))
+        self.go(at, q.ZEITPLAN)
+        self.assertEqual(at.query_params["ansicht"], ["zeitplan"])
+        self.assertEqual(at.query_params["t"], [TT_SLUG])
+        self.assertEqual(at.radio(key="bereich").value, q.ZEITPLAN)
+        at = self.app(TT_SLUG)  # bestehende ?t=-Links: unverändert Live, keine Ergänzung der Adresse
+        self.assertEqual(at.radio(key="bereich").value, q.LIVE)
+        self.assertNotIn("ansicht", at.query_params)
+        self.assertTrue(self.cards(at))
+
+    def test_static_live_link_replaces_live_area_without_loading_data(self):
+        basis = "https://stv-sev.github.io/testtag-public/"
+        at = self.app(TT_SLUG, live_url=basis)
+        roh = self.roh(at)
+        self.assertIn(f"href='{basis}?t={TT_SLUG}'", roh)
+        self.assertIn("⚡ Live-Resultate öffnen", self.text(at))
+        radio = at.radio(key="bereich")
+        self.assertEqual(radio.options, NAV[1:])
+        self.assertIsNone(radio.value)
+        self.assertEqual(self.cards(at), [])
+        self.assertEqual(sum("/veroeffentlichung?" in c["url"] for c in self.api.calls), 0)  # nur der Testtag
+        self.assert_clean(at)
+        self.go(at, q.RANGLISTE)
+        self.assertTrue(self.raenge(at))
+        self.assertEqual(at.query_params["ansicht"], ["rangliste"])
+        self.assertIn(f"href='{basis}?t={TT_SLUG}'", self.roh(at))  # Live-Pille bleibt in der Navigation
+        for wert in ("live", "unbekannt"):
+            with self.subTest(ansicht=wert):
+                at = self.app(TT_SLUG, ansicht=wert, live_url=basis)
+                self.assertIsNone(at.radio(key="bereich").value)
+                self.assertEqual(self.cards(at), [])
+        at = self.app(TT_SLUG, ansicht="startliste", live_url=basis.rstrip("/"))
+        self.assertEqual(at.radio(key="bereich").value, q.STARTLISTE)
+        self.assertIn(f"href='{basis}?t={TT_SLUG}'", self.roh(at))
+
+    def test_static_live_link_in_overview_but_archive_stays_in_streamlit(self):
+        basis = "https://stv-sev.github.io/testtag-public/"
+        at = self.app(live_url=basis)
+        roh = self.roh(at)
+        self.assertIn(f"href='{basis}?t={TT_SLUG}'", roh)
+        self.assertNotIn(f"?t={ARCHIV_SLUG}'", roh)
+        at = self.app(ARCHIV_SLUG, live_url=basis)
+        self.assertEqual(at.radio(key="bereich").options, NAV)
+        self.assertNotIn(basis, self.roh(at))
+        self.assertTrue(self.cards(at))
+
+    def test_invalid_static_live_address_keeps_live_in_streamlit(self):
+        for wert in ("http://stv-sev.github.io/testtag-public/", "https://x.example/?t=a", "javascript:alert(1)",
+                     "", "https://"):
+            with self.subTest(live_url=wert):
+                at = self.app(TT_SLUG, live_url=wert)
+                self.assertEqual(at.radio(key="bereich").options, NAV)
+                self.assertTrue(self.cards(at))
+                self.assertNotIn("class='tt-verweis'", self.roh(at))
+
+    def test_hidden_or_unknown_testtag_with_static_live_shows_no_link_and_no_data(self):
+        basis = "https://stv-sev.github.io/testtag-public/"
+        at = self.app(TT_SLUG, ansicht="rangliste", live_url=basis)
+        self.assertTrue(self.raenge(at))
+        for t in self.api.testtage:
+            if t["slug"] == TT_SLUG:
+                t["ist_oeffentlich"] = False
+        self.versatz += 10
+        at.run()
+        self.assertIn("Dieser Testtag ist nicht verfügbar.", [i.value for i in at.info])
+        self.assertEqual(self.raenge(at), [])
+        self.assertNotIn(basis, self.roh(at))
+        self.assert_clean(at)
+        at = self.app("gibt-es-nicht", ansicht="rangliste", live_url=basis)
+        self.assertNotIn(basis, self.roh(at))
+        self.assertEqual(self.kopf(at), "")
 
     # ── Live ──
     def test_live_newest_first_both_programs_and_filters(self):

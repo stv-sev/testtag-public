@@ -5,4 +5,7 @@ window.TT_CONFIG = Object.freeze({
   supabaseUrl: "https://lxljapebdcutlaaidtry.supabase.co",
   publishableKey: "sb_publishable_j9MGb4EU6J_afcu0vhAMkg_JybzHBKN",
   streamlitUrl: "https://testtag.streamlit.app",
+  // Rückfall auf die bisherige Anzeige: true leitet jeden Aufruf vor dem ersten Datenabruf nach
+  // streamlitUrl/?t=<slug>&ansicht=live um (vorher in Streamlit das Secret live_url entfernen).
+  rueckfall: false,
 });
