@@ -247,3 +247,25 @@ wechseln zur Rangliste, Publikation alle 30 s, je 6 min (`streamlit_wechsel.py`,
 | Laufdauer je Takt (Soll < 5 s), Median / Max | 14,1 / 34,1 s | 14,9 / 32,6 s |
 
 (Lauf B ungültig: Messlaptop stand 38 min still.) Die App schlief an diesem Tag wegen Inaktivität (Wecken 25 s).
+
+## Vorgemerkt (noch nicht umgesetzt, Auftrag vom 13.10.2026)
+
+Live-Liste bleibt unverändert.
+
+1. **Gesamtrangliste, Details gestuft:** nach dem Öffnen nur «Total Technik», «Total Athletik», «Gesamt».
+   «Total Technik» aufklappbar zu den Gerätetotalen, jedes Gerät weiter zu den Linien mit S und T (wie Technik).
+   «Total Athletik» aufklappbar zu «Total Kraft» und «Total Beweglichkeit», darunter die Einzeltests. Fehlend «–»,
+   Nullwert 0. Veröffentlichte Totale/Ränge verbindlich, keine Rangberechnung im Browser.
+2. **Technik: zusätzliche Ansicht «Gerät & Rotation»** (bestehende Rangliste bleibt): Programm, Gerät, Rotation
+   wählbar, AK-Filter optional. Riegen und Turner, die in dieser Rotation an diesem Gerät eingeteilt sind, in
+   Startreihenfolge – auch ohne Note. Bei freigegebenen Resultaten Linien S/T und Gerätetotal. Keine Geräteränge.
+   Einteilung aus Startgerät, Riege und Stationsfolge des Programms ableiten, nicht aus Noten. Zuerst prüfen, ob die
+   veröffentlichten Startlisten alles Nötige enthalten; fehlende Angaben im Publisher ergänzen.
+3. **Rotationsfilter = Freigabe:** je Programm nur Rotationen 1 … `published_rotation_max` (aus der geprüften
+   Publikation, nie direkt aus Excel); Beispiel 7 von 8 → nur 1–7, Rotation 8 auch nicht per URL; Freigabe 0 → keine
+   Rotation. Sinkt/ändert sich die Freigabe, unzulässige Auswahl verwerfen. Unveröffentlichte Noten nirgends sichtbar.
+4. **Vorher prüfen:** Zelladressen in **beiden aktuellen Arbeitsmappen** – bisher `Public!B5` Rotationsgrenze,
+   `Public!B7` Kraftmodus. Bei Änderung neue Zuordnung dokumentieren und im Publisher konsistent verwenden;
+   `Public!B7` nie ungeprüft als Rotationsgrenze lesen.
+5. **Keine «aktuelle Rotation»:** Zuschauer wählt selbst; nichts aus Uhrzeit oder letzter Note ableiten; die
+   Publikationsgrenze nicht als laufende Rotation bezeichnen.
