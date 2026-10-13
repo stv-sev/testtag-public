@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="de-CH">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Testtag Live</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>">
+<link rel="stylesheet" href="live.css">
+</head>
+<body>
+<main class="tt-seite">
+  <a class="tt-zurueck" id="zurueck" href="#">← Alle Testtage</a>
+  <header class="tt-kopf">
+    <div class="tt-logo"><img src="logo.png" alt="Turnsport Aargau" width="120" height="40"></div>
+    <div><h1 id="titel">Testtag</h1></div>
+    <div id="badge"></div>
+  </header>
+  <div class="tt-stand" id="stand"></div>
+  <div class="tt-warnung" id="warnung" role="status" hidden></div>
+  <nav class="tt-nav" id="nav" hidden>
+    <span class="tt-pille aktiv">⚡ Live</span>
+    <a class="tt-pille" data-ziel href="#">🏅 Ranglisten</a>
+    <a class="tt-pille" data-ziel href="#">📋 Startliste</a>
+    <a class="tt-pille" data-ziel href="#">🕐 Zeitplan</a>
+  </nav>
+  <div class="tt-filter" id="filter" hidden>
+    <label>Programm<select id="programm"></select></label>
+    <label>Altersklasse<select id="ak"></select></label>
+  </div>
+  <div class="tt-hinweise" id="hinweise"></div>
+  <div id="inhalt"><div class="tt-leer">Wird geladen …</div></div>
+  <footer class="tt-fuss">Öffentliche Ansicht – nur lesend. Noch nicht freigegebene Rotationen sind nicht
+    enthalten.<br>Turnsport Aargau · Testtag</footer>
+</main>
+<script src="config.js"></script>
+<script src="live.js"></script>
+</body>
+</html>

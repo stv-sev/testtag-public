@@ -1,0 +1,66 @@
+/* Gestaltung wie app.py (STIL): Dunkelblau #0D4E73 · Blau #15608A · Mittelblau #2C7FA6 · Hellblau #6FAFC9 ·
+   Fläche #D6EAF3 · Magenta #E6007E. Bewusst hell wie die Streamlit-App (gleiches Erscheinungsbild). */
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: #fff; color: #31333F; font-family: "Source Sans Pro", "Source Sans 3", system-ui,
+       -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 16px; line-height: 1.5; }
+.tt-seite { max-width: 760px; margin: 0 auto; padding: 1.5rem 16px 2rem; }
+.tt-zurueck { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; margin-bottom: 12px;
+              border: 1px solid rgba(49,51,63,.2); border-radius: 20px; color: #31333F; text-decoration: none;
+              font-size: .9rem; }
+.tt-zurueck:hover { border-color: #E6007E; color: #E6007E; }
+.tt-kopf { background: linear-gradient(135deg, #0D4E73, #15608A); border-bottom: 3px solid #E6007E;
+           border-radius: 12px; padding: 16px; display: flex; flex-direction: column; align-items: center;
+           text-align: center; gap: 10px; margin: 0 0 12px; }
+.tt-logo { background: #fff; border-radius: 8px; padding: 8px 16px; line-height: 0; }
+.tt-logo img { height: 40px; width: auto; }
+.tt-kopf h1 { font-size: 1.25rem; font-weight: 700; color: #fff; margin: 0; padding: 0; line-height: 1.3; }
+.tt-badge { display: inline-flex; align-items: center; gap: 6px; border-radius: 20px; padding: 3px 10px;
+            font-size: .75rem; font-weight: 700; white-space: nowrap; }
+.tt-badge.live { background: #FFE0F0; color: #E6007E; }
+.tt-badge.demnaechst { background: #D6EAF3; color: #15608A; }
+.tt-badge.archiv { background: #EEF1F4; color: #4A5A66; }
+.tt-punkt { width: 8px; height: 8px; border-radius: 50%; background: #E6007E; animation: tt-puls 1.2s infinite; }
+@keyframes tt-puls { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(1.3); } }
+.tt-stand { text-align: center; font-size: .72rem; color: #888; margin: 2px 0 8px; min-height: 1.1em; }
+.tt-warnung { background: #FFF8E1; color: #7A5A00; border-radius: 8px; padding: 10px 14px; font-size: .85rem;
+              margin: 0 0 10px; }
+.tt-warnung.offline { background: #FDECEC; color: #8A1C1C; }
+.tt-nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
+.tt-pille { display: inline-flex; align-items: center; min-height: 40px; padding: 7px 14px; border-radius: 20px;
+            background: #D6EAF3; color: #0D4E73; text-decoration: none; font-size: .9rem; }
+.tt-pille.aktiv { background: #0D4E73; color: #fff; font-weight: 700; }
+.tt-pille:not(.aktiv):hover { box-shadow: 0 1px 6px rgba(0,0,0,.12); }
+.tt-filter { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 0 0 10px; }
+.tt-filter label { display: flex; flex-direction: column; gap: 4px; font-size: .875rem; color: #31333F; min-width: 0; }
+.tt-filter select { font: inherit; font-size: 1rem; min-height: 40px; padding: 6px 10px; border-radius: 8px;
+                    border: 1px solid #F0F2F6; background: #F0F2F6; color: #31333F; width: 100%; }
+.tt-filter select:focus { outline: 2px solid #6FAFC9; }
+.tt-hinweise { font-size: .75rem; color: #15608A; margin: 0 0 4px; }
+.tt-hinweise div { margin: 2px 0; }
+.tt-anzahl { font-size: .75rem; color: #888; margin: 4px 0 8px; }
+.tt-karte { background: #fff; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 1px 8px rgba(0,0,0,.07);
+            padding: 10px 14px; }
+.tt-karte-kopf { display: flex; align-items: center; gap: 12px; }
+.tt-nr { border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700;
+         flex-shrink: 0; width: 26px; height: 26px; background: #D6EAF3; color: #2C7FA6; font-size: .72rem; }
+.tt-text { flex: 1; min-width: 0; }
+.tt-text strong { font-size: .9rem; color: #0D4E73; display: block; overflow-wrap: anywhere; }
+.tt-text small { font-size: .72rem; color: #888; display: block; overflow-wrap: anywhere; }
+.tt-wert { text-align: right; flex-shrink: 0; }
+.tt-wert .tt-geraet { font-size: .7rem; color: #888; display: block; }
+.tt-wert .tt-note { font-size: 1.05rem; font-weight: 700; color: #0D4E73; }
+.tt-wert .tt-zeit { font-size: .65rem; color: #aaa; display: block; }
+.tt-chips { display: flex; gap: 5px; flex-wrap: wrap; padding: 6px 0 0 38px; }
+.tt-chip { background: #D6EAF3; color: #2C7FA6; border-radius: 4px; padding: 2px 6px; font-size: .72rem;
+           font-weight: 500; }
+.tt-chip.tt-end { background: #0D4E73; color: #fff; font-weight: 700; }
+.tt-leer { text-align: center; padding: 28px 12px; color: #9aa7b0; font-size: .88rem; }
+.tt-fuss { text-align: center; font-size: .7rem; color: #aaa; margin-top: 18px; padding-bottom: 12px; }
+@media (max-width: 640px) {
+  .tt-chips { padding-left: 0; }
+  .tt-pille { padding: 7px 9px; font-size: .8rem; }
+  .tt-nav { gap: 4px; }
+  .tt-filter { gap: 10px; }
+}
