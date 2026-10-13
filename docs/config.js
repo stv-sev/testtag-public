@@ -8,7 +8,7 @@ window.TT_CONFIG = Object.freeze({
   // Rückfall auf die bisherige Anzeige: true leitet jeden Aufruf vor dem ersten Datenabruf nach
   // streamlitUrl/?t=<slug>&ansicht=live um (vorher in Streamlit das Secret live_url entfernen).
   rueckfall: false,
-  // Ranglisten auf dieser Seite (true) oder in Streamlit (false: Pille und &ansicht=rangliste führen nach
-  // streamlitUrl/?t=<slug>&ansicht=rangliste; vorher in Streamlit das Secret statische_rangliste entfernen).
-  rangliste: true,
+  // Ansichten auf dieser Seite zusätzlich zu Live. Eine fehlende führt (Pille, &ansicht=…) nach
+  // streamlitUrl/?t=<slug>&ansicht=…; vorher in Streamlit dieselbe aus dem Secret statische_bereiche entfernen.
+  ansichten: ["rangliste", "startliste", "zeitplan"],
 });

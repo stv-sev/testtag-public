@@ -1,40 +1,45 @@
 // Lastmessung Ansichtswechsel auf der statischen Seite: N Zuschauer in Headless-Chromium (je eigener Browserkontext)
-// wechseln innerhalb weniger Sekunden von Live zur Rangliste und bleiben dort. Nur lesend.
+// wechseln innerhalb weniger Sekunden gemeinsam die Ansicht. Nur lesend.
 //
-//   node wechsel_statisch.mjs <seiten-url> <slug> <anzahl> <sekunden> <log> <chromium-exe> klick|direkt
+//   node wechsel_statisch.mjs <seiten-url> <slug> <anzahl> <sekunden> <log> <chromium-exe> klick|direkt [ziele]
 //
-// klick:  alle öffnen zuerst Live (gestaffelt, 300 ms), nach 40 s tippen alle innerhalb von 2,5 s auf „Ranglisten“.
-// direkt: alle öffnen innerhalb von 2,5 s den Link ?t=<slug>&ansicht=rangliste (kalter Seitenaufruf).
-// Protokolliert (JSON-Zeilen, ohne Personendaten): Klick/Seitenaufruf, erste Rangliste (Dauer), jede Anzeige (Ansicht,
-// neuestes Resultat der AK, Prüfsumme der Ranglistenzeile), jede Supabase-Antwort mit Bytes, Fehler, Ressourcen.
+// ziele: Kommaliste aus rangliste, startliste, zeitplan (Vorgabe rangliste).
+// klick:  alle öffnen zuerst Live (gestaffelt, 300 ms); nach 40 s tippen alle innerhalb von 2,5 s auf das erste Ziel,
+//         jeweils 60 s später auf das nächste.
+// direkt: alle öffnen innerhalb von 2,5 s den Link ?t=<slug>&ansicht=<erstes Ziel> (kalter Seitenaufruf).
+// Protokolliert (JSON-Zeilen, ohne Personendaten): Klick/Seitenaufruf, erste Anzeige je Ziel (Dauer), jede Anzeige
+// (Ansicht, neuestes Resultat der AK, Prüfsumme), jede Supabase-Antwort mit Bytes, Fehler, Ressourcen.
 import { appendFileSync } from "node:fs";
 import os from "node:os";
 import { chromium } from "playwright-core";
 
 const [SEITE, SLUG, N, DAUER, LOG, EXE, MODUS] = [process.argv[2], process.argv[3], Number(process.argv[4]),
   Number(process.argv[5]), process.argv[6], process.argv[7], process.argv[8] || "klick"];
+const ZIELE = (process.argv[9] || "rangliste").split(",");
+const MERKMAL = { rangliste: ".tt-rangliste .tt-rangkarte", startliste: ".tt-startliste", zeitplan: ".tt-zeitplan" };
 const log = (daten) => appendFileSync(LOG, `${JSON.stringify({ t: Date.now() / 1000, ...daten })}\n`);
 const start = Date.now();
 const ende = start + DAUER * 1000;
-const WECHSEL = start + 40000;  // klick: Zeitpunkt des gemeinsamen Wechsels
+const WECHSEL = ZIELE.map((_, i) => start + 40000 + i * 60000);  // klick: Zeitpunkte der gemeinsamen Wechsel
 
 const browser = await chromium.launch({ executablePath: EXE, args: [
   "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
   "--disable-backgrounding-occluded-windows", "--renderer-process-limit=12"] });
-log({ art: "start", anzahl: N, seite: SEITE, modus: MODUS, wechsel: MODUS === "klick" ? WECHSEL / 1000 : start / 1000 });
+log({ art: "start", anzahl: N, seite: SEITE, modus: MODUS, ziele: ZIELE,
+  wechsel: MODUS === "klick" ? WECHSEL[0] / 1000 : start / 1000, wechsel_alle: WECHSEL.map((w) => w / 1000) });
 const warte = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 
 async function sitzung(nr) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const page = await ctx.newPage();
-  let t0 = null;
-  let erste = false;
+  let ziel = null, t0 = null, erreicht = false;
   await page.exposeFunction("__ttAnzeige", (i) => {
     log({ art: "anzeige", sitzung: nr, ts: i.t / 1000, ansicht: i.ansicht, n: i.n, pruef: (i.pruef || "").slice(0, 12),
       erster: i.erster ? i.erster.split("|").slice(1).join("|") : "" });
-    if (!erste && t0 !== null && i.ansicht === "rangliste" && i.n > 0) {
-      erste = true;
-      log({ art: "rangliste", sitzung: nr, dauer: i.t / 1000 - t0 / 1000 });
+    if (!erreicht && ziel && i.ansicht === ziel && i.n > 0) {
+      erreicht = true;
+      log({ art: "ziel", sitzung: nr, ziel, dauer: i.t / 1000 - t0 / 1000 });
+      if (ziel === "rangliste") log({ art: "rangliste", sitzung: nr, dauer: i.t / 1000 - t0 / 1000 });
     }
   });
   await page.exposeFunction("__ttEreignis", (i) => log({ art: "seitenfehler", sitzung: nr, code: i.code }));
@@ -60,19 +65,22 @@ async function sitzung(nr) {
       await page.goto(`${SEITE}?t=${encodeURIComponent(SLUG)}`, { timeout: 60000 });
       await page.waitForSelector(".tt-liste .tt-karte", { timeout: 60000 });
       log({ art: "live", sitzung: nr });
-      await warte(WECHSEL + Math.random() * 2500 - Date.now());
-      t0 = Date.now();
-      log({ art: "klick", sitzung: nr });
-      await page.click("[data-ansicht=rangliste]");
+      for (const [i, z] of ZIELE.entries()) {
+        await warte(WECHSEL[i] + Math.random() * 2500 - Date.now());
+        ziel = z; erreicht = false; t0 = Date.now();
+        log({ art: "klick", sitzung: nr, ziel: z });
+        await page.click(`[data-ansicht=${z}]`);
+        await page.waitForSelector(MERKMAL[z], { timeout: 120000 });
+      }
     } else {
       await warte(Math.random() * 2500);
-      t0 = Date.now();
-      log({ art: "klick", sitzung: nr });
-      await page.goto(`${SEITE}?t=${encodeURIComponent(SLUG)}&ansicht=rangliste`, { timeout: 60000 });
+      ziel = ZIELE[0]; t0 = Date.now();
+      log({ art: "klick", sitzung: nr, ziel });
+      await page.goto(`${SEITE}?t=${encodeURIComponent(SLUG)}&ansicht=${ziel}`, { timeout: 60000 });
+      await page.waitForSelector(MERKMAL[ziel], { timeout: 120000 });
     }
-    await page.waitForSelector(".tt-rangliste .tt-rangkarte", { timeout: 120000 });
   } catch (e) {
-    log({ art: "rangliste_fehler", sitzung: nr, text: String(e.message).slice(0, 120) });
+    log({ art: "ziel_fehler", sitzung: nr, ziel, text: String(e.message).slice(0, 120) });
   }
   while (Date.now() < ende) await warte(1000);
   log({ art: "ende", sitzung: nr });

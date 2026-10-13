@@ -88,11 +88,39 @@ body { margin: 0; background: #fff; color: #0D4E73; font-family: "Source Sans Pr
 .tt-st { flex-shrink: 0; min-width: 3.6em; text-align: right; }
 .tt-linie b.tt-st { color: #0D4E73; }
 .tt-dhinweis { color: #888; font-size: .76rem; padding: 4px 0; }
+/* Startliste und Zeitplan (wie app.py) */
+.tt-programm { font-size: 1.05rem; font-weight: 700; color: #0D4E73; margin: 14px 0 8px; }
+.tt-tabelle { border: 1px solid #D6EAF3; border-radius: 6px; margin-bottom: 16px; overflow: hidden; }
+.tt-titel { background: #0D4E73; color: #fff; padding: 8px 14px; font-weight: 700; font-size: .92rem; }
+.tt-tabelle table { width: 100%; border-collapse: collapse; font-size: .82rem; margin: 0; table-layout: auto; }
+.tt-tabelle th { background: #D6EAF3; color: #0D4E73; padding: 5px 8px; text-align: left; font-weight: 600; border: none; }
+.tt-tabelle td { padding: 5px 8px; border: none; border-bottom: 1px solid #f0f0f0; color: #666; overflow-wrap: anywhere;
+                 vertical-align: top; }
+.tt-tabelle td.tt-pos { color: #15608A; font-weight: 600; }
+.tt-tabelle table.tt-startliste { table-layout: fixed; }
+.tt-startliste th:nth-child(1) { width: 3em; }
+.tt-startliste th:nth-child(3) { width: 3.6em; }
+.tt-startliste th:nth-child(4) { width: 4.4em; }
+.tt-tabelle td.tt-turner { color: #0D4E73; font-weight: 500; }
+.tt-zeile { display: flex; gap: 12px; padding: 7px 14px; border-bottom: 1px solid #f0f0f0; color: #15608A; }
+.tt-zeile:last-child { border-bottom: none; }
+.tt-uhr { font-weight: 700; color: #0D4E73; flex: 0 0 7.2em; }
+.tt-zeile small { display: block; color: #888; font-size: .72rem; }
+.tt-filter label[hidden] + label, .tt-filter label:has(+ label[hidden]) { grid-column: 1 / -1; }
+/* Übersicht (wie app.py: Kopfband-Untertitel, Gruppen, Testtag-Karten) */
+.tt-unter { font-size: .8rem; color: #6FAFC9; margin-top: 4px; }
+.tt-ueberschrift { font-size: 1.05rem; font-weight: 700; color: #15608A; padding: 14px 0 4px; margin: 0 0 8px; }
+.tt-testtag { display: flex; align-items: center; min-height: 52px; padding: 10px 16px; margin-bottom: 8px; background: #fff;
+              border-radius: 12px; box-shadow: 0 1px 8px rgba(0,0,0,.07); color: #0D4E73; font-weight: 700; font-size: .95rem;
+              text-decoration: none; overflow-wrap: anywhere; }
+.tt-testtag:hover { box-shadow: 0 2px 12px rgba(0,0,0,.12); }
+.tt-meta { font-size: .72rem; color: #888; margin: -4px 0 12px 4px; }
 .tt-leer { text-align: center; padding: 28px 12px; color: #9aa7b0; font-size: .88rem; }
 .tt-fuss { text-align: center; font-size: .7rem; color: #aaa; margin-top: 18px; padding-bottom: 12px; }
 @media (max-width: 640px) {
   .tt-chips { padding-left: 0; }
   .tt-details { margin-left: 0; }
+  .tt-tabelle th, .tt-tabelle td { padding: 5px 6px; }
   .tt-pille { padding: 7px 9px; font-size: .8rem; }
   .tt-nav { gap: 4px; }
   .tt-filter { gap: 10px; }

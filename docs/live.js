@@ -1,23 +1,28 @@
 /*
- * live.js – statische Ansicht eines Testtags: Live und Ranglisten (ohne Abhängigkeiten; Ranglistendarstellung in
- * rangliste.js). Startliste, Zeitplan und Archiv bleiben in Streamlit.
+ * live.js – statische Ansicht eines laufenden Testtags: Live, Ranglisten, Startliste und Zeitplan (ohne
+ * Abhängigkeiten; Ranglistendarstellung in rangliste.js) sowie ohne `?t=` die Übersicht der öffentlichen Testtage
+ * (Live, Demnächst, Archiv; archivierte öffnen das Streamlit-Archiv). Welche Ansichten hier angeboten werden, legt
+ * config.js fest (`ansichten`); die übrigen führen in Streamlit.
  *
  * Liest wie quelle.py ausschliesslich über die Supabase Data API (PostgREST) mit dem Publishable Key – als
  * Abfrageparameter `apikey`, damit jede Anfrage ein einfacher CORS-GET ohne Vorabanfrage bleibt. Kein
  * Authorization-Kopf, kein Schreibweg, nichts im Browserspeicher.
  *
- * Datenfluss je Takt (Live: 5 s, vorbereitet: 30 s; nur solange die Seite sichtbar ist):
+ * Datenfluss je Takt (Live und Ranglisten eines laufenden Testtags: 5 s; Startliste, Zeitplan oder vorbereiteter
+ * Testtag: 30 s – deren Inhalt ändert sich selten; nur solange die Seite sichtbar ist):
  *   1. Änderungsabfrage `testtage` (id, Status, stand_am) – rund 160 B Nutzlast.
  *      Leer → Testtag unbekannt oder verborgen: alle geladenen Daten sofort verwerfen.
  *   2. Nur bei neuem stand_am/Status, nach einem Fehler oder alle 5 Minuten (Kontrolle): Kopfzeilen der
- *      Live- und Ranglistenzeilen (bereich, programm, ak, pruefsumme, stand_am, aktiv, hinweis – ohne Inhalt).
+ *      angebotenen Bereiche (bereich, programm, ak, pruefsumme, stand_am, aktiv, hinweis – ohne Inhalt).
  *   3. Nur die für die gewählte Ansicht benötigten Zeilen, deren Prüfsumme sich geändert hat, in einer Anfrage
  *      (`pruefsumme=in.(…)`): Live die Live-Zeilen der Auswahl; Rangliste die Ranglistenzeile der AK und deren
- *      Live-Zeile (Einzelwertungen für die Details). Jede Zeile wird geprüft (Schema, Prüfsumme über den kanonischen
+ *      Live-Zeile (Einzelwertungen für die Details); Startliste die Zeilen der Programme; Zeitplan die gemeinsame
+ *      Zeile. Jede Zeile wird geprüft (Schema, Prüfsumme über den kanonischen
  *      Inhalt wie publication_model.content_checksum); erst wenn alles stimmt, wird der Stand ersetzt.
  * Bei einem Fehler bleibt der letzte gültige Stand sichtbar, gekennzeichnet; neue Versuche mit wachsendem Abstand.
  *
- * Adresse: `?t=<slug>` Live, `&ansicht=rangliste` Ranglisten, `&p=<programm>&ak=<ak>` Auswahl (beide Ansichten),
+ * Adresse: `?t=<slug>` Live, `&ansicht=rangliste|startliste|zeitplan`, `&p=<programm>&ak=<ak>` Auswahl (für alle
+ * Ansichten; Startliste nur Programm, Zeitplan ohne Auswahl),
  * `&art=technik|athletik` Ebene der Rangliste (ohne: Gesamt). Ranglisten haben kein „Alle“: ohne passende Auswahl
  * gilt das erste Programm bzw. die erste AK; eine Live-Auswahl „Alle“ bleibt dabei erhalten.
  */
@@ -29,15 +34,20 @@
   const ZEITLIMIT = 8000;
   const MAX_PAUSE = 30000;
   const VERALTET_NACH = 12000;
+  const TAKT_UEBERSICHT = 60000;
   const MAX_LIVE = 300;
   const LIVE = "resultate_live";
   const RANGLISTE = "resultate_rangliste";
+  const STARTLISTE = "startliste";
+  const ZEITPLAN = "zeitplan";
+  const ANSICHTEN = ["live", "rangliste", "startliste", "zeitplan"];
+  const BEREICH = { live: LIVE, rangliste: RANGLISTE, startliste: STARTLISTE, zeitplan: ZEITPLAN };
   const SCHEMA = "publikation-1";
   const ALLE = "Alle";
   const PROGRAMM_REIHENFOLGE = ["AK5-AK9+", "AK9-AK12"];
   const PROGRAMM_TEXT = { "AK5-AK9+": "AK5–AK9+", "AK9-AK12": "AK9–AK12" };
   const ATHLETIK_TEXT = { beweglichkeit: "Beweglichkeit", kraft: "Kraft" };
-  const TITEL = { live: "Live", rangliste: "Ranglisten" };
+  const TITEL = { live: "Live", rangliste: "Ranglisten", startliste: "Startliste", zeitplan: "Zeitplan" };
   const SLUG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
   const HEX64 = /^[0-9a-f]{64}$/;
@@ -47,7 +57,7 @@
 
   const $ = (id) => document.getElementById(id);
   const el = { titel: $("titel"), badge: $("badge"), stand: $("stand"), warnung: $("warnung"), nav: $("nav"),
-    filter: $("filter"), programm: $("programm"), ak: $("ak"), arten: $("arten"), hinweise: $("hinweise"),
+    unter: $("unter"), filter: $("filter"), programm: $("programm"), ak: $("ak"), arten: $("arten"), hinweise: $("hinweise"),
     inhalt: $("inhalt"), zurueck: $("zurueck") };
 
   // ── Hilfen ────────────────────────────────────────────────────────────────────────────────────────
@@ -82,7 +92,9 @@
         || !key.startsWith("sb_publishable_") || key.length <= 15 || /\s/.test(key)) return null;
     const streamlit = String(c.streamlitUrl || "").replace(/\/+$/, "");
     return { basis: url.origin, key, streamlit: /^(https:\/\/[^/?#@]+|http:\/\/(localhost|127\.0\.0\.1)(:\d+)?)$/.test(streamlit) ? streamlit : "",
-      rueckfall: c.rueckfall === true, rangliste: c.rangliste === true && !!R };
+      rueckfall: c.rueckfall === true,
+      ansichten: new Set(["live", ...(Array.isArray(c.ansichten) ? c.ansichten : [])
+        .filter((a) => ANSICHTEN.includes(a) && (a !== "rangliste" || R))]) };
   }
 
   async function hole(z, tabelle, parameter) {
@@ -150,7 +162,8 @@
   let auswahlOffen = false;    // Auswahl während eines Takts geändert: sofort nachladen
   let taktOffen = false;       // Takt fiel in ein gezieltes Nachladen: danach sofort nachholen
   const auswahl = { programm: ALLE, ak: ALLE };
-  let ansicht = "live";        // live | rangliste
+  let ansicht = "live";        // live | rangliste | startliste | zeitplan
+  let taktMs = TAKT_LIVE;      // aktueller Abstand der Änderungsabfrage
   let art = "gesamt";          // Ebene der Rangliste
 
   function vergessen() {
@@ -173,7 +186,7 @@
     return r.length ? testtagAusZeile(r[0]) : null;
   }
 
-  const bereiche = () => (z.rangliste ? [LIVE, RANGLISTE] : [LIVE]);
+  const bereiche = () => [...z.ansichten].map((a) => BEREICH[a]);
   const bereichFilter = (b) => (b.length === 1 ? `eq.${b[0]}` : `in.(${b.join(",")})`);
 
   async function ladeKoepfe(id) {
@@ -217,7 +230,19 @@
     return { programme, programm, aks, ak: aks.includes(auswahl.ak) ? auswahl.ak : ALLE };
   }
 
+  // Startliste: Programme mit veröffentlichter Startliste; gewähltes Programm oder alle.
+  function startlistenAuswahl(kp) {
+    const programme = programmeIn(kp, STARTLISTE);
+    return { programme, programm: programme.includes(auswahl.programm) ? auswahl.programm : ALLE };
+  }
+
   function benoetigt(kp) {
+    if (ansicht === "startliste") {
+      const { programm } = startlistenAuswahl(kp);
+      return [...kp.entries()].filter(([, k]) => k.bereich === STARTLISTE && (programm === ALLE || k.programm === programm))
+        .map(([s]) => s);
+    }
+    if (ansicht === "zeitplan") return [...kp.keys()].filter((s) => kp.get(s).bereich === ZEITPLAN);
     if (ansicht === "rangliste") {
       const { programm, ak } = ranglistenAuswahl(kp);
       if (!programm || !ak) return [];
@@ -235,6 +260,7 @@
       for (const g of inhalt.gruppen) for (const x of (Array.isArray(g.resultate) ? g.resultate : [])) if (x && typeof x === "object") resultate.push(x);
       return { resultate: sortiere(resultate) };
     }
+    if (bereich === STARTLISTE || bereich === ZEITPLAN) return { gruppen: inhalt.gruppen };
     const gruppen = inhalt.gruppen.map((g) => ({ liste: g.liste,
       eintraege: (Array.isArray(g.eintraege) ? g.eintraege : []).filter((e) => e && typeof e === "object") }));
     const struktur = inhalt.struktur && typeof inhalt.struktur === "object" && !Array.isArray(inhalt.struktur)
@@ -301,7 +327,8 @@
         nachholen = !vollstaendig;  // eine Zeile änderte sich während des Ladens: im nächsten Takt nachholen
       }
       letzterErfolg = Date.now(); fehlerFolge = 0;
-      naechster = tt.status === "live" ? TAKT_LIVE : TAKT_VORBEREITET;
+      naechster = taktFuer(tt);
+      taktMs = naechster;
       zeichne();
     } catch (e) {
       fehlerFolge += 1;
@@ -354,6 +381,20 @@
     angezeigt = "";
     adresse(neuerEintrag);
     auswahlGeaendert();
+    nachTakt();
+  }
+
+  // 5 s nur für Live und Ranglisten eines laufenden Testtags; Startliste, Zeitplan, vorbereitet: 30 s.
+  const taktFuer = (tt) => (tt && tt.status === "live" && (ansicht === "live" || ansicht === "rangliste")
+    ? TAKT_LIVE : TAKT_VORBEREITET);
+
+  // Nach einem Ansichtswechsel gilt deren Takt: ist die letzte Prüfung älter, sofort prüfen.
+  function nachTakt() {
+    if (!testtag || testtag.status === "archiviert") return;
+    const soll = taktFuer(testtag);
+    const alter = Date.now() - letzterErfolg;
+    taktMs = soll;
+    plane(alter >= soll ? 0 : soll - alter);  // fällt er in ein Nachladen, holt dieses ihn nach (taktOffen)
   }
 
   // ── Darstellung ───────────────────────────────────────────────────────────────────────────────────
@@ -438,7 +479,12 @@
     document.title = `${testtag.titel} – ${TITEL[ansicht]}`;
     el.badge.innerHTML = badge(testtag.status);
     navigation();
-    if (ansicht === "rangliste") zeichneRangliste(); else zeichneLive();
+    if (ansicht !== "rangliste") el.arten.hidden = true;
+    el.ak.closest("label").hidden = ansicht === "startliste";
+    if (ansicht === "rangliste") zeichneRangliste();
+    else if (ansicht === "startliste") zeichneStartliste();
+    else if (ansicht === "zeitplan") zeichneZeitplan();
+    else zeichneLive();
   }
 
   function zeichneLive() {
@@ -509,6 +555,56 @@
       { n: eintraege.length, erster: kurz(alle[0]), pruef: zeilen.get(sr).pruefsumme });
   }
 
+  // Wie app._startliste: je Programm die Gruppen nach Startgerät/Riege (leere Gruppen entfallen).
+  function zeichneStartliste() {
+    el.hinweise.innerHTML = "";
+    const { programme, programm } = startlistenAuswahl(koepfe);
+    el.filter.hidden = !programme.length;
+    if (programme.length) optionen(el.programm, programme, programm, programmText, true);
+    const schl = benoetigt(koepfe);
+    if (!schl.every((s) => zeilen.has(s))) { setzeInhalt("<div class='tt-leer'>Wird geladen …</div>", { n: -1 }); return; }
+    const listen = schl.map((s) => [koepfe.get(s).programm, zeilen.get(s)]).sort(([a], [b]) => vergleicheProgramm(a, b))
+      .map(([p, zl]) => [p, zl.gruppen.filter((g) => Array.isArray(g.teilnehmer) && g.teilnehmer.length)])
+      .filter(([, gruppen]) => gruppen.length);
+    if (!listen.length) { setzeInhalt("<div class='tt-leer'>Es ist noch keine Startliste veröffentlicht.</div>", { n: 0 }); return; }
+    const teile = [];
+    for (const [p, gruppen] of listen) {
+      teile.push(`<div class='tt-programm'>${h(programmText(p))}</div>`);
+      for (const g of gruppen) teile.push(startlisteTabelle(g));
+    }
+    setzeInhalt(teile.join(""), { n: listen.reduce((n, [, gs]) => n + gs.reduce((m, g) => m + g.teilnehmer.length, 0), 0),
+      pruef: schl.map((s) => zeilen.get(s).pruefsumme.slice(0, 8)).join(",") });
+  }
+
+  // Wie app.startliste_tabelle: Pos., Turner, Jg., AK, Verein.
+  function startlisteTabelle(g) {
+    const zeilenHtml = g.teilnehmer.filter((t) => t && typeof t === "object").map((t) => `<tr><td class='tt-pos'>${h(t.position ?? "")}</td>`
+      + `<td class='tt-turner'>${h(t.vorname ?? "")} ${h(t.name ?? "")}</td><td>${h(t.jahrgang ?? "")}</td>`
+      + `<td>${h(t.ak ?? "")}</td><td>${h(t.verein ?? "")}</td></tr>`).join("");
+    return `<div class='tt-tabelle'><div class='tt-titel'>Startgerät / Riege: ${h(g.startgeraet)}</div>`
+      + "<table class='tt-startliste'><thead><tr><th>Pos.</th><th>Turner</th><th>Jg.</th><th>AK</th><th>Verein</th></tr></thead>"
+      + `<tbody>${zeilenHtml}</tbody></table></div>`;
+  }
+
+  // Wie app._zeitplan: gemeinsamer Tagesablauf in der Reihenfolge des Publishers (leere Blöcke entfallen).
+  function zeichneZeitplan() {
+    el.hinweise.innerHTML = ""; el.filter.hidden = true;
+    const schl = benoetigt(koepfe);
+    if (!schl.every((s) => zeilen.has(s))) { setzeInhalt("<div class='tt-leer'>Wird geladen …</div>", { n: -1 }); return; }
+    const bloecke = schl.length ? zeilen.get(schl[0]).gruppen.filter((b) => Array.isArray(b.zeilen) && b.zeilen.length) : [];
+    if (!bloecke.length) { setzeInhalt("<div class='tt-leer'>Es ist noch kein Zeitplan veröffentlicht.</div>", { n: 0 }); return; }
+    const teile = [];
+    for (const b of bloecke) {
+      teile.push(`<div class='tt-tabelle tt-zeitplan'><div class='tt-titel'>${h(programmText(b.programm ?? ""))}</div>`);
+      for (const zl of b.zeilen.filter((x) => x && typeof x === "object")) {
+        teile.push(`<div class='tt-zeile'><span class='tt-uhr'>${h(zl.zeit)}</span><span>${h(zl.programmpunkt)}`
+          + `${zl.hinweis ? `<small>${h(zl.hinweis)}</small>` : ""}</span></div>`);
+      }
+      teile.push("</div>");
+    }
+    setzeInhalt(teile.join(""), { n: bloecke.length, pruef: zeilen.get(schl[0]).pruefsumme.slice(0, 8) });
+  }
+
   function kurz(r) {
     return r ? `${r.ergebnis_id}|${r.geaendert_am}|${r.S ?? ""}|${r.T ?? ""}|${r.punkte ?? ""}` : "";
   }
@@ -520,7 +616,7 @@
       : testtag.stand_am;
     el.stand.textContent = testtag.status === "archiviert" ? "" : `Datenstand ${zeitText(datenstand, true)} · geprüft `
       + `${letzterErfolg ? zeitText(new Date(letzterErfolg).toISOString()) : "–"}`;
-    const veraltet = testtag.status !== "archiviert" && (Date.now() - letzterErfolg > VERALTET_NACH
+    const veraltet = testtag.status !== "archiviert" && (Date.now() - letzterErfolg > Math.max(VERALTET_NACH, taktMs + 7000)
       || (nachholen && fehlerFolge > 0));
     el.warnung.hidden = !veraltet;
     if (veraltet) {
@@ -547,7 +643,7 @@
     el.filter.hidden = true; el.nav.hidden = true; el.arten.hidden = true; el.hinweise.innerHTML = "";
     el.stand.textContent = "";
     setzeInhalt(`<div class='tt-leer'>Dieser Testtag ist abgeschlossen. Ranglisten und Resultate stehen im `
-      + `<a href="${h(streamlitLink(ansicht === "rangliste" ? "rangliste" : null))}">Archiv</a>.</div>`, { n: 0 });
+      + `<a href="${h(streamlitLink(ansicht === "live" ? null : ansicht))}">Archiv</a>.</div>`, { n: 0 });
   }
 
   function zeigeWarten() {
@@ -559,9 +655,64 @@
     if (typeof window.__ttEreignis === "function") window.__ttEreignis({ t: Date.now(), art, code });
   }
 
+  // ── Übersicht ohne ?t= (wie app.uebersicht): nur, was die öffentlichen Leserechte liefern ───────────────
+  let uebersichtFehler = 0;
+  let uebersichtTimer = null;
+  let uebersichtGezeigt = false;
+  const KURZ_BADGE = { live: ["live", "LIVE"], vorbereitet: ["demnaechst", "Demnächst"], archiviert: ["archiv", "Archiv"] };
+
+  async function uebersicht() {
+    clearTimeout(uebersichtTimer);
+    let naechster = TAKT_UEBERSICHT;
+    try {
+      const r = await hole(z, "testtage", [["select", "id,slug,titel,status,stand_am"]]);
+      const tage = [];
+      for (const x of r) { try { tage.push(testtagAusZeile(x)); } catch { /* ungültige Zeile: wie quelle.py auslassen */ } }
+      // wie quelle.sortiere_testtage: Live, vorbereitet, Archiv; je Gruppe zuletzt aktualisiert zuerst
+      tage.sort((a, b) => Date.parse(b.stand_am) - Date.parse(a.stand_am) || (a.slug < b.slug ? 1 : a.slug > b.slug ? -1 : 0));
+      tage.sort((a, b) => STATUS.indexOf(a.status) - STATUS.indexOf(b.status));
+      uebersichtFehler = 0;
+      el.warnung.hidden = true;
+      zeigeUebersicht(tage);
+    } catch (e) {
+      uebersichtFehler += 1;
+      naechster = Math.min(MAX_PAUSE, TAKT_LIVE * 2 ** (uebersichtFehler - 1));
+      melde("fehler", e && e.code ? e.code : "UNBEKANNT");
+      if (!uebersichtGezeigt) zeigeWarten();
+      else { el.warnung.hidden = false; el.warnung.className = "tt-warnung"; el.warnung.textContent = `${VERALTET}. Die Seite versucht es automatisch erneut.`; }
+    } finally {
+      if (document.visibilityState !== "hidden") uebersichtTimer = setTimeout(uebersicht, naechster);
+    }
+  }
+
+  function zeigeUebersicht(tage) {
+    uebersichtGezeigt = true;
+    el.titel.textContent = "Testtage";
+    el.unter.textContent = "Turnsport Aargau · Live-Resultate, Ranglisten, Startlisten";
+    el.unter.hidden = false;
+    document.title = "Testtage";
+    if (!tage.length) { setzeInhalt("<div class='tt-leer'>Zurzeit ist kein Testtag veröffentlicht.</div>", { n: 0, uebersicht: true }); return; }
+    const teile = [];
+    for (const [status, ueberschrift] of [["live", "Live"], ["vorbereitet", "Demnächst"], ["archiviert", "Archiv"]]) {
+      const gruppe = tage.filter((t) => t.status === status);
+      if (!gruppe.length) continue;
+      teile.push(`<h2 class='tt-ueberschrift'>${ueberschrift}</h2>`);
+      for (const t of gruppe) {
+        // laufende und bevorstehende Testtage hier, archivierte im Streamlit-Archiv
+        const ziel = status === "archiviert" ? (z.streamlit ? `${z.streamlit}/?t=${encodeURIComponent(t.slug)}` : "#")
+          : `?t=${encodeURIComponent(t.slug)}`;
+        const [klasse, text] = KURZ_BADGE[status];
+        teile.push(`<a class='tt-testtag' href="${h(ziel)}">${h(t.titel)}</a>`
+          + `<div class='tt-meta'><span class="tt-badge ${klasse}">${klasse === "live" ? "<span class='tt-punkt'></span>" : ""}`
+          + `${text}</span> &nbsp;Stand ${h(zeitText(t.stand_am, true))} · Adresse ?t=${h(t.slug)}</div>`);
+      }
+    }
+    setzeInhalt(teile.join(""), { n: tage.length, uebersicht: true, slugs: tage.map((t) => t.slug).join(",") });
+  }
+
   function ausAdresse() {
     const a = new URLSearchParams(location.search);
-    ansicht = a.get("ansicht") === "rangliste" ? "rangliste" : "live";
+    ansicht = z.ansichten.has(a.get("ansicht")) ? a.get("ansicht") : "live";
     auswahl.programm = a.get("p") || ALLE;
     auswahl.ak = a.get("ak") || ALLE;
     art = R && R.ARTEN.includes(a.get("art")) ? a.get("art") : "gesamt";
@@ -569,17 +720,17 @@
 
   // ── Start ─────────────────────────────────────────────────────────────────────────────────────────
   const gewuenscht = new URLSearchParams(location.search).get("ansicht") || "live";
-  if (z && z.streamlit) el.zurueck.href = `${z.streamlit}/`;
+  el.zurueck.href = location.pathname;  // Übersicht dieser Seite (nicht mehr die Streamlit-Übersicht)
   for (const a of document.querySelectorAll("[data-ziel]")) a.href = streamlitLink(a.dataset.ziel);
-  if (z && !z.rangliste) {  // Ranglisten (noch) in Streamlit: Pille führt dorthin
-    for (const a of document.querySelectorAll("[data-ansicht=rangliste]")) {
-      delete a.dataset.ansicht; a.dataset.ziel = "rangliste"; a.href = streamlitLink("rangliste");
+  for (const a of document.querySelectorAll("[data-ansicht]")) {  // hier nicht angeboten: Pille führt nach Streamlit
+    if (z && !z.ansichten.has(a.dataset.ansicht)) {
+      a.dataset.ziel = a.dataset.ansicht; delete a.dataset.ansicht; a.href = streamlitLink(a.dataset.ziel);
     }
   }
-  const nurStreamlit = ["startliste", "zeitplan", ...(z && z.rangliste ? [] : ["rangliste"])].includes(gewuenscht);
+  const nurStreamlit = !!z && ANSICHTEN.includes(gewuenscht) && !z.ansichten.has(gewuenscht);
   if (z && z.streamlit && (z.rueckfall || nurStreamlit)) {
     // Rückfall oder hier nicht angebotene Ansicht: bisherige Anzeige in Streamlit, vor jedem Datenabruf
-    location.replace(slug && SLUG.test(slug) ? streamlitLink(nurStreamlit || gewuenscht === "rangliste" ? gewuenscht : "live")
+    location.replace(slug && SLUG.test(slug) ? streamlitLink(ANSICHTEN.includes(gewuenscht) ? gewuenscht : "live")
       : `${z.streamlit}/`);
     return;
   }
@@ -588,9 +739,18 @@
     el.inhalt.innerHTML = "<div class='tt-leer'>Für diese Ansicht ist noch kein Zugang hinterlegt.</div>";
     return;
   }
-  if (!slug || !SLUG.test(slug)) {
-    el.inhalt.innerHTML = `<div class='tt-leer'>${slug ? "Die Adresse nennt keinen gültigen Testtag." : "Kein Testtag gewählt."} `
-      + `<a href="${h(z.streamlit)}/">Alle Testtage</a></div>`;
+  if (!slug) {  // Übersicht der öffentlichen Testtage
+    el.zurueck.hidden = true;
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") uebersicht(); else clearTimeout(uebersichtTimer);
+    });
+    window.addEventListener("online", uebersicht);
+    uebersicht();
+    return;
+  }
+  if (!SLUG.test(slug)) {
+    el.inhalt.innerHTML = `<div class='tt-leer'>Die Adresse nennt keinen gültigen Testtag. `
+      + `<a href="${h(location.pathname)}">Alle Testtage</a></div>`;
     return;
   }
   ausAdresse();
@@ -614,6 +774,7 @@
     ausAdresse();
     if (vorher !== ansicht) angezeigt = "";
     auswahlGeaendert();
+    nachTakt();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") { if (!laeuft) takt(); } else { clearTimeout(timer); timer = null; }

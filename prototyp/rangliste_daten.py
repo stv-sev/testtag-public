@@ -1,18 +1,19 @@
-"""Synthetische Stände für den Ranglistentest der statischen Seite und Vergleich mit der Streamlit-Darstellung.
+"""Synthetische Stände für den Test der statischen Seite und Vergleich mit der Streamlit-Darstellung.
 
     python -B rangliste_daten.py erzeugen <projekt> <ziel.json> [<voll-ordner>]
     python -B rangliste_daten.py vergleichen <projekt> <ziel.json> <gezeichnet.json>
 
 `erzeugen` baut mit den Testhilfen (tests/_support) und dem Publikationsmodell mehrere Stände eines synthetischen
 Testtags – nur erfundene Personen – und speichert je Stand die Zeilen `veroeffentlichung` (wie publiziert) sowie die
-erwartete Darstellung jeder Rangliste (Programm × AK × Ebene) als Klartext, erzeugt mit app.rang_karte und
-quelle.turner_details – also genau so, wie die Streamlit-App sie zeigt:
+erwartete Darstellung jeder Rangliste (Programm × AK × Ebene), der Startliste (alle Programme und je Programm) und
+des Zeitplans als Klartext, erzeugt mit app.rang_karte, quelle.turner_details, app.startliste_tabelle und dem Aufbau
+von app._zeitplan – also genau so, wie die Streamlit-App sie zeigt:
   r2            Rotationsgrenze: nur Rotation 1–2 freigegeben (Athletik noch offen)
   r8            alle Rotationen freigegeben (neue Resultate gegenüber r2)
   korrektur     korrigierte Note (Rang- und Totaländerung) und erstes Resultat einer bisher leeren Person
   ohne_struktur ältere Publikation ohne `struktur`, dazu ein Eintrag mit widersprüchlichem Total
   gross         optional: vollständig gefüllter Testtag (108 Personen, alle Resultate) aus <voll-ordner>
-`vergleichen` prüft die im Browser gezeichneten Listen (rangliste_test.mjs) gegen diese Erwartung.
+`vergleichen` prüft die im Browser gezeichneten Ansichten (rangliste_test.mjs) gegen diese Erwartung.
 """
 import html
 import json
@@ -55,6 +56,32 @@ def erwartet(stand, programm, ak, art) -> str:
         eigene = je_person.get(e.get("teilnehmer"), [])
         karten.append(app.rang_karte(e, art, eigene, q.turner_details(e, eigene, struktur, alle)))
     return klartext("".join([f"<div>{app._h(hinweis)}</div>" if hinweis else "", *karten, f"<div>{FUSS}</div>"]))
+
+
+def erwartet_startliste(stand, programm) -> str:
+    """Wie app._startliste; mit gewähltem Programm nur dessen Gruppen (Alle = Streamlit-Ansicht)."""
+    listen = [(p, g) for p, g in q.startlisten(stand) if programm in ("Alle", p)]
+    if not listen:
+        return "Es ist noch keine Startliste veröffentlicht."
+    teile = []
+    for p, gruppen in listen:
+        teile.append(f"<div>{app._h(app._programm(p))}</div>")
+        teile += [app.startliste_tabelle(g) for g in gruppen]
+    return klartext("".join(teile))
+
+
+def erwartet_zeitplan(stand) -> str:
+    """Wie app._zeitplan."""
+    bloecke = q.zeitplan(stand)
+    if not bloecke:
+        return "Es ist noch kein Zeitplan veröffentlicht."
+    teile = []
+    for block in bloecke:
+        teile.append(f"<div>{app._h(app._programm(block.get('programm', '')))}</div>")
+        for zeile in block["zeilen"]:
+            hinweis = f"<small>{app._h(zeile.get('hinweis'))}</small>" if zeile.get("hinweis") else ""
+            teile.append(f"<div>{app._h(zeile.get('zeit'))}</div><span>{app._h(zeile.get('programmpunkt'))}{hinweis}</span>")
+    return klartext("".join(teile))
 
 
 def stand_aus(zeilen, zeit):
@@ -118,16 +145,21 @@ def erzeugen(ziel: Path, voll: Path | None):
             for ak in q.altersklassen(stand, q.RANGLISTE, programm):
                 for art in q.RANGLISTEN:
                     listen[f"{programm}|{ak}|{art}"] = erwartet(stand, programm, ak, art)
-        out["staende"].append({"name": name, "stand_am": zeit, "listen": listen,
+        ansichten = {"zeitplan": erwartet_zeitplan(stand)}
+        for programm in ["Alle", *q.programme(stand, q.STARTLISTE)]:
+            ansichten[f"startliste|{programm}"] = erwartet_startliste(stand, programm)
+        out["staende"].append({"name": name, "stand_am": zeit, "listen": listen, "ansichten": ansichten,
                                "zeilen": [{"oeffentliche_testtag_id": TESTTAG_ID, "bereich": z["bereich"],
                                            "programm": z["programm"], "ak": z["ak"], "pruefsumme": z["pruefsumme"],
                                            "stand_am": zeit, "inhalt": z["inhalt"]} for z in zeilen]})
     ziel.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
-    print(", ".join(f"{s['name']}: {len(s['zeilen'])} Zeilen, {len(s['listen'])} Listen" for s in out["staende"]))
+    print(", ".join(f"{s['name']}: {len(s['zeilen'])} Zeilen, {len(s['listen'])} Ranglisten, {len(s['ansichten'])} weitere"
+                    for s in out["staende"]))
 
 
 def vergleichen(ziel: Path, gezeichnet: Path):
-    soll = {s["name"]: s["listen"] for s in json.loads(ziel.read_text(encoding="utf-8"))["staende"]}
+    soll = {s["name"]: {**s["listen"], **{f"ansicht:{k}": v for k, v in s.get("ansichten", {}).items()}}
+            for s in json.loads(ziel.read_text(encoding="utf-8"))["staende"]}
     ist = json.loads(gezeichnet.read_text(encoding="utf-8"))
     fehler, geprueft = [], 0
     for name, listen in soll.items():
@@ -142,7 +174,8 @@ def vergleichen(ziel: Path, gezeichnet: Path):
                 fehler.append(f"{name} {schluessel}: abweichend ab …{b[max(0, i - 40):i + 40]!r} / …{a[max(0, i - 40):i + 40]!r}")
     for f in fehler[:20]:
         print("FEHL", f)
-    print(f"{geprueft - len(fehler)} von {geprueft} Ranglisten identisch mit der Streamlit-Darstellung")
+    print(f"{geprueft - len(fehler)} von {geprueft} Ansichten identisch mit der Streamlit-Darstellung "
+          f"({sum(not k.startswith('ansicht:') for v in soll.values() for k in v)} Ranglisten, übrige Startliste/Zeitplan)")
     sys.exit(1 if fehler else 0)
 
 

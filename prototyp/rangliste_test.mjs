@@ -1,10 +1,12 @@
-// Funktionstest der statischen Rangliste in Headless-Chromium gegen eine nachgebildete Supabase-Data-API (nur
+// Funktionstest der statischen Ranglisten, Startliste und des Zeitplans in Headless-Chromium gegen eine nachgebildete Supabase-Data-API (nur
 // synthetische Stände aus rangliste_daten.py; keine Anfrage verlässt den Rechner).
 //   node rangliste_test.mjs <seiten-url> <staende.json> <chromium-exe> <bildordner> <gezeichnet.json>
 // Prüft: Wechsel Live ⇄ Rangliste ohne Neuladen (Auswahl bleibt, Zurück-Taste), alle Ranglisten aller Stände
 // (Vergleich mit Streamlit danach durch rangliste_daten.py vergleichen), Korrektur während der Anzeige (offene Details
 // bleiben offen), Unterbruch, Prüfsummenfehler, verborgener Testtag, Archiv, Smartphone-/Desktopbreite,
-// Streamlit-Links, Schalter rangliste:false und rueckfall:true.
+// Startliste/Zeitplan (Wechsel, Programmfilter, Zurück-Taste, 30-s-Takt, Änderung, Unterbruch, verborgen, Archiv),
+// Übersicht ohne ?t= (Gruppen, Reihenfolge, Ziele, verborgene Testtage), Streamlit-Links, Schalter `ansichten` und
+// rueckfall:true.
 import { readFileSync, writeFileSync } from "node:fs";
 import { chromium } from "playwright-core";
 
@@ -17,6 +19,12 @@ const PROGRAMM_TEXT = { "AK5-AK9+": "AK5–AK9+", "AK9-AK12": "AK9–AK12" };
 const staende = Object.fromEntries(daten.staende.map((s) => [s.name, s]));
 
 // ── nachgebildete Supabase (PostgREST-Ausschnitt, den live.js verwendet) ───────────────────────────────
+// Übersicht: was RLS für anon liefert (verborgene Testtage fehlen dort bereits)
+const UEBERSICHT = [
+  { id: "5e7a0c1d-0000-4000-8000-0000000000b1", slug: "systemtest-demnaechst", titel: "Bald – synthetisch", status: "vorbereitet", stand_am: "2026-10-09T07:00:00Z" },
+  { id: "5e7a0c1d-0000-4000-8000-0000000000a1", slug: "systemtest-archiv", titel: "Früher – synthetisch", status: "archiviert", stand_am: "2026-09-01T10:00:00Z" },
+  { id: "5e7a0c1d-0000-4000-8000-0000000000a2", slug: "systemtest-archiv-neu", titel: "Neuer – synthetisch", status: "archiviert", stand_am: "2026-09-20T10:00:00Z" },
+];
 const sb = { stand: staende.r2, sichtbar: true, status: "live", kaputt: false, netz: true, verzoegerung: 0, anfragen: [] };
 function filter(wert, ausdruck) {
   if (ausdruck.startsWith("eq.")) return String(wert) === ausdruck.slice(3);
@@ -37,8 +45,9 @@ function antwort(url) {
   sb.anfragen.push({ tabelle, teil: p.has("pruefsumme") ? "zeilen" : tabelle === "testtage" ? "pruefung" : "koepfe",
     bereich: p.get("bereich"), key: p.get("apikey") });
   if (tabelle === "testtage") {
-    return sb.sichtbar && p.get("slug") === `eq.${SLUG}`
-      ? [{ id: ID, slug: SLUG, titel: TITEL, status: sb.status, stand_am: sb.stand.stand_am }] : [];
+    const eigener = sb.sichtbar ? [{ id: ID, slug: SLUG, titel: TITEL, status: sb.status, stand_am: sb.stand.stand_am }] : [];
+    if (!p.has("slug")) return [...UEBERSICHT, ...eigener];
+    return p.get("slug") === `eq.${SLUG}` ? eigener : [];
   }
   if (tabelle !== "veroeffentlichung" || !sb.sichtbar) return [];
   let zeilen = sb.stand.zeilen;
@@ -68,7 +77,8 @@ async function kontext(viewport, mobil, config) {
   if (config) {
     const basis = readFileSync(CONFIG_JS, "utf8");
     await ctx.route(/\/config\.js$/, (r) => r.fulfill({ status: 200, contentType: "text/javascript",
-      body: basis.replace(/rueckfall: \w+/, `rueckfall: ${config.rueckfall}`).replace(/rangliste: \w+/, `rangliste: ${config.rangliste}`) }));
+      body: basis.replace(/rueckfall: \w+/, `rueckfall: ${config.rueckfall}`)
+        .replace(/ansichten: \[[^\]]*\]/, `ansichten: ${JSON.stringify(config.ansichten)}`) }));
   }
   const page = await ctx.newPage();
   page.on("pageerror", (e) => fehler.push(`JS-Fehler ${e.message}`));
@@ -77,11 +87,44 @@ async function kontext(viewport, mobil, config) {
 const adresse = (extra = "") => `${seite}?t=${SLUG}${extra}`;
 const bereit = (page) => page.waitForFunction(() => {
   const i = document.getElementById("inhalt");
-  return i && !i.textContent.includes("Wird geladen") && i.querySelector(".tt-rangliste, .tt-liste, .tt-leer");
+  return i && !i.textContent.includes("Wird geladen") && i.querySelector(".tt-rangliste, .tt-liste, .tt-leer, .tt-tabelle");
 }, null, { timeout: 15000 });
 const breite = (page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 const warte = (ms) => new Promise((r) => setTimeout(r, ms));
 const gezeichnet = {};
+
+// ── 0. Übersicht ohne ?t= ────────────────────────────────────────────────────────────────────────────────
+{
+  const { ctx, page } = await kontext({ width: 390, height: 844 }, true);
+  sb.stand = staende.r8; sb.status = "live"; sb.sichtbar = true;
+  await page.goto(seite);
+  await page.waitForSelector(".tt-testtag");
+  pruefe(JSON.stringify(await page.locator(".tt-ueberschrift").allTextContents()) === JSON.stringify(["Live", "Demnächst", "Archiv"]),
+    "Übersicht: Gruppen Live, Demnächst, Archiv");
+  const karten = await page.$$eval(".tt-testtag", (as) => as.map((a) => [a.textContent, a.getAttribute("href")]));
+  pruefe(JSON.stringify(karten) === JSON.stringify([[TITEL, `?t=${SLUG}`], ["Bald – synthetisch", "?t=systemtest-demnaechst"],
+    ["Neuer – synthetisch", `${STREAMLIT}/?t=systemtest-archiv-neu`], ["Früher – synthetisch", `${STREAMLIT}/?t=systemtest-archiv`]]),
+    `Übersicht: Reihenfolge und Ziele (statisch bzw. Streamlit-Archiv) ${JSON.stringify(karten.map((k) => k[1]))}`);
+  pruefe(await page.locator("#zurueck").isHidden() && await page.locator("#nav").isHidden() && await page.title() === "Testtage",
+    "Übersicht ohne Zurück-Link und Navigation");
+  pruefe(await breite(page), "Übersicht ohne waagrechte Scrollbar");
+  await page.screenshot({ path: `${bilder}/mobil-uebersicht.png`, fullPage: true });
+  await page.click(`.tt-testtag[href="?t=${SLUG}"]`);
+  await page.waitForSelector(".tt-liste .tt-karte");
+  pruefe(new URL(page.url()).search === `?t=${SLUG}`, "Übersicht → Live dieses Testtags");
+  await page.click("#zurueck");
+  await page.waitForSelector(".tt-testtag");
+  pruefe(new URL(page.url()).search === "", "„← Alle Testtage“ führt zur Übersicht dieser Seite");
+  sb.sichtbar = false;  // verborgen: fehlt in der Übersicht, direkter Slug zeigt nichts
+  await page.reload();
+  await page.waitForSelector(".tt-testtag");
+  pruefe(!(await page.content()).includes(TITEL), "verborgener Testtag erscheint nicht in der Übersicht");
+  await page.goto(adresse("&ansicht=startliste"));
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("nicht verfügbar"));
+  pruefe(!(await page.content()).includes("Synthaler") && await page.locator("#nav").isHidden(), "verborgen, direkter Slug: keine Personendaten");
+  sb.sichtbar = true;
+  await ctx.close();
+}
 
 // ── 1. Smartphone: Wechsel Live ⇄ Rangliste, Korrektur, Unterbruch, Prüfsumme, verborgen, Archiv ───────────
 {
@@ -96,9 +139,7 @@ const gezeichnet = {};
   await bereit(page);
   pruefe(await page.$eval("[data-ansicht=rangliste]", (a) => a.getAttribute("href")).then((h) => h.includes("ansicht=rangliste")
     && h.includes("ak=AK+7")), "Live: Pille Ranglisten verweist auf diese Seite mit Auswahl");
-  for (const ziel of ["startliste", "zeitplan"]) {
-    pruefe(await page.getAttribute(`[data-ziel=${ziel}]`, "href") === `${STREAMLIT}/?t=${SLUG}&ansicht=${ziel}`, `Live → ${ziel} in Streamlit`);
-  }
+  pruefe(await page.locator("[data-ziel]").count() === 0, "Live: alle vier Pillen auf dieser Seite");
   await page.evaluate(() => { window.__ohneNeuladen = true; });
   const vorWechsel = sb.anfragen.length;
   const t0 = Date.now();
@@ -207,6 +248,81 @@ const gezeichnet = {};
   await ctx.close();
 }
 
+// ── 1c. Startliste und Zeitplan: Wechsel, Filter, Zurück, 30-s-Takt, Änderung, Unterbruch, verborgen, Archiv ──
+{
+  const { ctx, page } = await kontext({ width: 390, height: 844 }, true);
+  sb.stand = staende.r8; sb.status = "live"; sb.sichtbar = true; sb.netz = true;
+  await page.goto(adresse("&p=AK9-AK12"));
+  await page.waitForSelector(".tt-liste .tt-karte");
+  await page.evaluate(() => { window.__ohneNeuladen = true; });
+  let vor = sb.anfragen.length;
+  await page.click("[data-ansicht=startliste]");
+  await page.waitForSelector(".tt-startliste");
+  let neu = sb.anfragen.slice(vor);
+  pruefe(neu.length === 1 && neu[0].teil === "zeilen" && neu[0].bereich === "eq.startliste",
+    `Live → Startliste: eine Anfrage (${JSON.stringify(neu.map((a) => `${a.teil}:${a.bereich}`))})`);
+  pruefe(await page.evaluate(() => window.__ohneNeuladen === true) && page.url().includes("ansicht=startliste")
+    && page.url().includes("p=AK9-AK12"), `Startliste ohne Neuladen, Adresse ${new URL(page.url()).search}`);
+  pruefe(await page.inputValue("#programm") === "AK9-AK12" && await page.locator("#ak").isHidden()
+    && await page.locator(".tt-programm").allTextContents().then((t) => t.join() === "AK9–AK12"), "Programmfilter übernommen, nur AK9–AK12, ohne AK-Feld");
+  await page.selectOption("#programm", "Alle");
+  await bereit(page);
+  pruefe(await page.locator(".tt-programm").allTextContents().then((t) => t.join("|") === "AK5–AK9+|AK9–AK12") && !page.url().includes("p="),
+    "Startliste „Alle“: beide Programme wie Streamlit");
+  pruefe(await breite(page), "Smartphone: Startliste ohne waagrechte Scrollbar");
+  await page.screenshot({ path: `${bilder}/mobil-startliste.png`, fullPage: true });
+  vor = sb.anfragen.length;
+  await page.click("[data-ansicht=zeitplan]");
+  await page.waitForSelector(".tt-zeitplan");
+  neu = sb.anfragen.slice(vor);
+  pruefe(neu.length === 1 && neu[0].bereich === "eq.zeitplan" && await page.locator("#filter").isHidden(), "Startliste → Zeitplan: eine Anfrage, ohne Filter");
+  pruefe(await breite(page), "Smartphone: Zeitplan ohne waagrechte Scrollbar");
+  await page.screenshot({ path: `${bilder}/mobil-zeitplan.png`, fullPage: true });
+  // 30-s-Takt: in 25 s höchstens eine Änderungsabfrage
+  vor = sb.anfragen.length;
+  await warte(25000);
+  const abfragen = sb.anfragen.slice(vor).filter((a) => a.teil === "pruefung").length;
+  pruefe(abfragen <= 1, `Zeitplan: Änderungsabfrage im 30-s-Takt (${abfragen} in 25 s)`);
+  pruefe(await page.locator("#warnung").isHidden(), "kein Veraltet-Hinweis zwischen zwei 30-s-Prüfungen");
+  await page.goBack();
+  await page.waitForSelector(".tt-startliste");
+  await page.goBack();
+  await page.waitForSelector(".tt-liste .tt-karte");
+  pruefe(!page.url().includes("ansicht="), "Zurück-Taste: Zeitplan → Startliste → Live");
+  vor = sb.anfragen.length;
+  await warte(6000);
+  pruefe(sb.anfragen.slice(vor).some((a) => a.teil === "pruefung"), "zurück auf Live: wieder 5-s-Takt");
+  // Änderung der Startliste während der Anzeige (neuer Stand)
+  await page.click("[data-ansicht=startliste]");
+  await page.waitForSelector(".tt-startliste");
+  sb.stand = staende.gross;
+  const t0 = Date.now();
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Synthname"), null, { timeout: 45000 });
+  pruefe(true, `Startliste aktualisiert nach Publikation (${Math.round((Date.now() - t0) / 1000)} s, Takt 30 s)`);
+  // Unterbruch
+  sb.netz = false; await ctx.setOffline(true);
+  await page.waitForSelector("#warnung:not([hidden])", { timeout: 80000 });
+  pruefe(await page.locator(".tt-startliste").count() > 0, "Startliste offline: Hinweis, letzter Stand bleibt");
+  sb.netz = true; await ctx.setOffline(false);
+  await page.waitForSelector("#warnung", { state: "hidden", timeout: 40000 });
+  pruefe(true, "Startliste wieder online");
+  // verborgen
+  sb.sichtbar = false;
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("nicht verfügbar"), null, { timeout: 45000 });
+  pruefe(!(await page.content()).includes("Synthname") && await page.locator("#nav").isHidden(), "Startliste verborgen: keine Namen mehr im DOM");
+  sb.sichtbar = true;
+  await ctx.close();
+}
+for (const ansicht of ["startliste", "zeitplan"]) {  // Archiv: Link ins Streamlit-Archiv derselben Ansicht
+  const { ctx, page } = await kontext({ width: 390, height: 844 }, true);
+  sb.status = "archiviert";
+  await page.goto(adresse(`&ansicht=${ansicht}`));
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("abgeschlossen"));
+  pruefe(await page.getAttribute("#inhalt a", "href") === `${STREAMLIT}/?t=${SLUG}&ansicht=${ansicht}`, `Archiv aus ${ansicht}: Link ins Streamlit-Archiv`);
+  sb.status = "live";
+  await ctx.close();
+}
+
 // ── 2. Alle Ranglisten aller Stände zeichnen (Vergleich mit Streamlit danach) ────────────────────────────
 {
   const { ctx, page } = await kontext({ width: 1280, height: 900 }, false);
@@ -226,7 +342,17 @@ const gezeichnet = {};
         && await page.inputValue("#ak") === ak);
     }
     pruefe(optionenOk.every(Boolean), `${s.name}: ${optionenOk.length} Ranglisten gezeichnet, Auswahlfelder wie Streamlit`);
+    for (const k of Object.keys(s.ansichten)) {
+      const [a, p] = k.split("|");
+      await page.goto(adresse(`&ansicht=${a}${p && p !== "Alle" ? `&p=${encodeURIComponent(p)}` : ""}`));
+      await bereit(page);
+      gezeichnet[s.name][`ansicht:${k}`] = await page.innerHTML("#inhalt");
+    }
   }
+  await page.goto(adresse("&ansicht=startliste"));
+  await bereit(page);
+  pruefe(await breite(page), "Desktop: Startliste ohne waagrechte Scrollbar");
+  await page.screenshot({ path: `${bilder}/desktop-startliste.png`, fullPage: true });
   // Desktop-Bildschirmfotos und Wechsel von Live mit „Alle“ (erste AK, Live-Auswahl bleibt)
   sb.stand = staende.korrektur;
   await page.goto(adresse());
@@ -248,9 +374,23 @@ const gezeichnet = {};
   await ctx.close();
 }
 
-// ── 3. Schalter: Ranglisten in Streamlit (rangliste:false) und Rückfall ───────────────────────────────────
+// ── 3. Schalter: Ansichten in Streamlit (ansichten ohne rangliste bzw. ohne startliste/zeitplan) und Rückfall ───
 {
-  const { ctx, page } = await kontext({ width: 390, height: 844 }, true, { rueckfall: false, rangliste: false });
+  const { ctx, page } = await kontext({ width: 390, height: 844 }, true, { rueckfall: false, ansichten: ["rangliste"] });
+  sb.stand = staende.korrektur;
+  await page.goto(adresse());
+  await page.waitForSelector(".tt-karte");
+  for (const z of ["startliste", "zeitplan"]) {
+    pruefe(await page.getAttribute(`[data-ziel=${z}]`, "href") === `${STREAMLIT}/?t=${SLUG}&ansicht=${z}`, `ansichten ohne ${z}: Pille führt nach Streamlit`);
+  }
+  const vor = sb.anfragen.length;
+  await page.goto(adresse("&ansicht=zeitplan"));
+  await page.waitForURL((x) => x.href.startsWith(STREAMLIT));
+  pruefe(page.url() === `${STREAMLIT}/?t=${SLUG}&ansicht=zeitplan` && sb.anfragen.length === vor, "&ansicht=zeitplan leitet ohne Datenabruf nach Streamlit");
+  await ctx.close();
+}
+{
+  const { ctx, page } = await kontext({ width: 390, height: 844 }, true, { rueckfall: false, ansichten: ["startliste", "zeitplan"] });
   sb.stand = staende.korrektur;
   await page.goto(adresse());
   await page.waitForSelector(".tt-karte");
@@ -263,8 +403,9 @@ const gezeichnet = {};
     "rangliste:false – &ansicht=rangliste leitet ohne Datenabruf nach Streamlit");
   await ctx.close();
 }
-for (const [extra, ziel] of [["&ansicht=rangliste&ak=AK+7", "rangliste"], ["", "live"]]) {
-  const { ctx, page } = await kontext({ width: 390, height: 844 }, true, { rueckfall: true, rangliste: true });
+for (const [extra, ziel] of [["&ansicht=rangliste&ak=AK+7", "rangliste"], ["&ansicht=startliste&p=AK9-AK12", "startliste"],
+  ["&ansicht=zeitplan", "zeitplan"], ["", "live"]]) {
+  const { ctx, page } = await kontext({ width: 390, height: 844 }, true, { rueckfall: true, ansichten: ["rangliste", "startliste", "zeitplan"] });
   const vor = sb.anfragen.length;
   await page.goto(adresse(extra));
   await page.waitForURL((x) => x.href.startsWith(STREAMLIT));

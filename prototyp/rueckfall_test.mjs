@@ -1,7 +1,7 @@
-// Rückfalltest: statische Seite mit `rueckfall: true` und Streamlit ohne Secrets `live_url`/`statische_rangliste`
+// Rückfalltest: statische Seite mit `rueckfall: true` und Streamlit ohne Secrets `live_url`/`statische_bereiche`
 // (nur lesend).
 //   node rueckfall_test.mjs <statisch-url> <streamlit-url> <slug> <chromium-exe>
-// Erwartet: Umleitung vor jedem Supabase-Abruf auf Streamlit ?t=<slug>&ansicht=live (bzw. rangliste), dort die
+// Erwartet: Umleitung vor jedem Supabase-Abruf auf Streamlit ?t=<slug>&ansicht=live (bzw. rangliste, startliste, zeitplan), dort die
 // Ansicht wie bisher.
 import { chromium } from "playwright-core";
 
@@ -17,6 +17,8 @@ page.on("request", (r) => {
 });
 for (const [weg, ziel, bereich, sel] of [[`?t=${slug}&p=AK5-AK9%2B`, `?t=${slug}&ansicht=live`, "Live", ".tt-karte"],
   [`?t=${slug}&ansicht=rangliste&p=AK5-AK9%2B&art=technik`, `?t=${slug}&ansicht=rangliste`, "Ranglisten", ".tt-rangkarte"],
+  [`?t=${slug}&ansicht=startliste&p=AK9-AK12`, `?t=${slug}&ansicht=startliste`, "Startliste", ".tt-startliste"],
+  [`?t=${slug}&ansicht=zeitplan`, `?t=${slug}&ansicht=zeitplan`, "Zeitplan", ".tt-zeitplan"],
   ["", ""], ["?t=x%26y", ""]]) {
   vonStatisch.length = 0;
   await page.goto(`${statisch.replace(/\/+$/, "")}/${weg}`);

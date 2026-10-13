@@ -12,11 +12,11 @@ Adressen:
   ein Bereichswechsel schreibt ihn in die Adresse. Filter (Programm, AK) stehen bewusst nicht in der Adresse.
 
 Statische Live-Ansicht (optional, Secret `live_url`, z. B. `https://stv-sev.github.io/testtag-public/`): Ist sie
-hinterlegt, führt „Live“ bei nicht archivierten Testtagen auf `live_url?t=<slug>`; Streamlit zeigt dann nur
+hinterlegt, führt „← Alle Testtage“ auf deren Übersicht und „Live“ bei nicht archivierten Testtagen auf `live_url?t=<slug>`; Streamlit zeigt dann nur
 Ranglisten, Startliste und Zeitplan und lädt für den Live-Hinweis keine Daten. Ohne `live_url` bleibt alles wie
-bisher (Rückfall: Secret entfernen). Zusätzlich `statische_rangliste = true`: auch „Ranglisten“ führt auf die statische
-Seite (`live_url?t=<slug>&ansicht=rangliste`); Streamlit zeigt dann nur Startliste und Zeitplan. Ohne diesen Schalter
-bleiben die Ranglisten hier (Rückfall nur der Rangliste).
+bisher (Rückfall: Secret entfernen). Zusätzlich `statische_bereiche = ["rangliste", "startliste", "zeitplan"]` (Liste,
+auch teilweise): diese Bereiche führen ebenfalls auf die statische Seite (`live_url?t=<slug>&ansicht=…`) und werden
+hier nicht mehr geladen. Fehlt ein Bereich in der Liste, bleibt er hier (Rückfall je Bereich).
 
 Ein Testtag zeigt beide Programme (AK5–AK9+, AK9–AK12) in vier Bereichen: Live, Ranglisten, Startliste,
 Zeitplan. Nur Testtage mit Status `live` aktualisieren sich etwa alle 5 Sekunden (`st.fragment`).
@@ -169,6 +169,7 @@ STIL = """
 [class*="st-key-oeffnen-"] button p { color: #0D4E73; font-weight: 700; font-size: 0.95rem; text-align: left; }
 [class*="st-key-oeffnen-"] button:hover { box-shadow: 0 2px 12px rgba(0,0,0,.12); border: none; }
 .st-key-zurueck button { border-radius: 20px; min-height: 40px; }
+a.tt-pille.tt-alle { background: #fff; border: 1px solid rgba(13,78,115,.2); padding: 0 14px; font-size: 0.875rem; }
 /* Statische Live-Ansicht: Link als Pille in derselben Zeile wie die Bereiche */
 .st-key-nav { gap: 6px; flex-wrap: wrap; align-items: center; }
 .st-key-nav > div { width: auto !important; flex: 0 0 auto; }
@@ -316,10 +317,12 @@ def statische_links(testtag) -> dict[str, str]:
     if link is None:
         return {}
     try:
-        rangliste = st.secrets.get("statische_rangliste", False) is True
+        liste = st.secrets.get("statische_bereiche", [])
+        gewaehlt = {str(b) for b in liste} if isinstance(liste, (list, tuple)) else set()
     except Exception:
-        rangliste = False
-    return {q.LIVE: link, **({q.RANGLISTE: f"{link}&ansicht=rangliste"} if rangliste else {})}
+        gewaehlt = set()
+    return {q.LIVE: link, **{b: f"{link}&ansicht={ANSICHT_PARAM[b]}" for b in q.BEREICHE
+                              if b != q.LIVE and ANSICHT_PARAM[b] in gewaehlt}}
 
 
 def _live_pille(link: str, text: str = "⚡ Live") -> str:
@@ -677,17 +680,24 @@ def navigation(bereiche: list[str], links: dict[str, str]):
     with st.container(horizontal=True, key="nav"):
         for bereich, link in links.items():
             _html([_live_pille(link, NAV_TEXT[bereich])])
+        if not bereiche:  # alle Bereiche auf der statischen Seite
+            return None
         return st.radio("Bereich", bereiche, index=None if links else 0, horizontal=True, key="bereich",
                         label_visibility="collapsed", format_func=lambda b: NAV_TEXT[b], on_change=_ansicht_merken)
+
+
+VERWEIS_TEXT = {q.LIVE: ("Die Live-Resultate werden", "⚡ Live-Resultate öffnen"),
+                q.RANGLISTE: ("Die Ranglisten werden", "🏅 Ranglisten öffnen"),
+                q.STARTLISTE: ("Die Startliste wird", "📋 Startliste öffnen"),
+                q.ZEITPLAN: ("Der Zeitplan wird", "🕐 Zeitplan öffnen")}
 
 
 def live_verweis(links: dict[str, str]) -> None:
     """Bereich liegt auf der statischen Seite: kein Datenabruf, keine Personendaten, nur der Weg dorthin."""
     gewuenscht = PARAM_ANSICHT.get(str(st.query_params.get("ansicht", "") or "").strip())
-    if gewuenscht == q.RANGLISTE and q.RANGLISTE in links:
-        text, link, knopf = "Die Ranglisten werden", links[q.RANGLISTE], "🏅 Ranglisten öffnen"
-    else:
-        text, link, knopf = "Die Live-Resultate werden", links[q.LIVE], "⚡ Live-Resultate öffnen"
+    bereich = gewuenscht if gewuenscht in links else q.LIVE
+    text, knopf = VERWEIS_TEXT[bereich]
+    link = links[bereich]
     _html([f"<div class='tt-verweis'>{text} auf einer eigenen, schnellen Seite angezeigt.<br>",
            _live_pille(link, knopf), "</div>"])
 
@@ -723,7 +733,11 @@ def zeichne() -> None:
         uebersicht(zugang)
         fuss()
         return
-    st.button("← Alle Testtage", on_click=_zur_uebersicht, key="zurueck")
+    basis = _live_basis()
+    if basis:  # Übersicht der statischen Seite (auch aus dem Archiv)
+        _html([f"<a class='tt-pille tt-alle' href='{_h(basis)}' target='_self'>← Alle Testtage</a>"])
+    else:
+        st.button("← Alle Testtage", on_click=_zur_uebersicht, key="zurueck")
     merk = f"testtag|{kennung}"
     try:
         testtag = finde(zugang, kennung)

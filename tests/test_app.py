@@ -60,15 +60,15 @@ class AppTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def app(self, t: str | None = None, secrets: dict | None = None, ansicht: str | None = None,
-            live_url: str | None = None, statische_rangliste=None) -> AppTest:
+            live_url: str | None = None, statische_bereiche=None) -> AppTest:
         at = AppTest.from_file(APP, default_timeout=60)
         for key, value in (secrets or {"supabase_url": "https://example-ref.supabase.co",
                                        "supabase_publishable_key": TEST_PUBLISHABLE_KEY}).items():
             at.secrets[key] = value
         if live_url is not None:
             at.secrets["live_url"] = live_url
-        if statische_rangliste is not None:
-            at.secrets["statische_rangliste"] = statische_rangliste
+        if statische_bereiche is not None:
+            at.secrets["statische_bereiche"] = statische_bereiche
         if t:
             at.query_params["t"] = t
         if ansicht:
@@ -235,7 +235,7 @@ class AppTests(unittest.TestCase):
     def test_static_ranking_link_replaces_ranking_area_without_loading_data(self):
         basis = "https://stv-sev.github.io/testtag-public/"
         live, rangliste = f"href='{basis}?t={TT_SLUG}'", f"href='{basis}?t={TT_SLUG}&amp;ansicht=rangliste'"
-        at = self.app(TT_SLUG, ansicht="rangliste", live_url=basis, statische_rangliste=True)
+        at = self.app(TT_SLUG, ansicht="rangliste", live_url=basis, statische_bereiche=["rangliste"])
         roh = self.roh(at)
         self.assertIn(live, roh)
         self.assertIn(rangliste, roh)
@@ -246,21 +246,54 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.raenge(at), [])
         self.assertEqual(sum("/veroeffentlichung?" in c["url"] for c in self.api.calls), 0)  # nur der Testtag
         self.assert_clean(at)
-        at = self.app(TT_SLUG, live_url=basis, statische_rangliste=True)
+        at = self.app(TT_SLUG, live_url=basis, statische_bereiche=["rangliste"])
         self.assertIn("⚡ Live-Resultate öffnen", self.text(at))
         self.go(at, q.STARTLISTE)
         self.assertEqual(at.query_params["ansicht"], ["startliste"])
         self.assertIn(rangliste, self.roh(at))  # beide Pillen bleiben in der Navigation
-        at = self.app(ARCHIV_SLUG, ansicht="rangliste", live_url=basis, statische_rangliste=True)
+        at = self.app(ARCHIV_SLUG, ansicht="rangliste", live_url=basis, statische_bereiche=["rangliste"])
         self.assertEqual(at.radio(key="bereich").value, q.RANGLISTE)  # Archiv bleibt vollständig hier
         self.assertTrue(self.raenge(at))
-        self.assertNotIn(basis, self.roh(at))
-        for live_url, schalter in ((None, True), (basis, "true"), (basis, False)):
+        self.assertNotIn(f"{basis}?t=", self.roh(at))  # höchstens die Übersicht
+        for live_url, schalter in ((None, ["rangliste"]), (basis, "rangliste"), (basis, []), (basis, ["unbekannt"])):
             with self.subTest(live_url=live_url, schalter=schalter):  # ohne live_url oder ohne true: Rangliste hier
-                at = self.app(TT_SLUG, ansicht="rangliste", live_url=live_url, statische_rangliste=schalter)
+                at = self.app(TT_SLUG, ansicht="rangliste", live_url=live_url, statische_bereiche=schalter)
                 self.assertEqual(at.radio(key="bereich").value, q.RANGLISTE)
                 self.assertTrue(self.raenge(at))
                 self.assertNotIn("ansicht=rangliste'", self.roh(at))
+
+    def test_all_areas_static_streamlit_shows_only_links_and_loads_no_data(self):
+        basis = "https://stv-sev.github.io/testtag-public/"
+        alle = ["rangliste", "startliste", "zeitplan"]
+        for ansicht, knopf in (("startliste", "📋 Startliste öffnen"), ("zeitplan", "🕐 Zeitplan öffnen"),
+                               (None, "⚡ Live-Resultate öffnen")):
+            with self.subTest(ansicht=ansicht):
+                self.api.calls.clear()
+                at = self.app(TT_SLUG, ansicht=ansicht, live_url=basis, statische_bereiche=alle)
+                roh = self.roh(at)
+                for ziel in ("", "&amp;ansicht=rangliste", "&amp;ansicht=startliste", "&amp;ansicht=zeitplan"):
+                    self.assertIn(f"href='{basis}?t={TT_SLUG}{ziel}'", roh)
+                self.assertIn(knopf, self.text(at))
+                self.assertEqual(len(at.radio), 0)  # kein Bereich mehr in Streamlit
+                self.assertEqual(sum("/veroeffentlichung?" in c["url"] for c in self.api.calls), 0)
+                self.assertNotIn("tt-startliste'>", roh)
+                self.assert_clean(at)
+        at = self.app(TT_SLUG, ansicht="zeitplan", live_url=basis, statische_bereiche=["rangliste", "startliste"])
+        self.assertEqual(at.radio(key="bereich").value, q.ZEITPLAN)  # nur Zeitplan bleibt hier
+        at = self.app(ARCHIV_SLUG, ansicht="startliste", live_url=basis, statische_bereiche=alle)
+        self.assertEqual(at.radio(key="bereich").value, q.STARTLISTE)  # Archiv bleibt vollständig hier
+        self.assertNotIn(f"{basis}?t=", self.roh(at))  # höchstens die Übersicht
+
+    def test_back_link_leads_to_static_overview_when_configured(self):
+        basis = "https://stv-sev.github.io/testtag-public/"
+        for slug in (TT_SLUG, ARCHIV_SLUG):
+            with self.subTest(slug=slug):
+                at = self.app(slug, live_url=basis)
+                self.assertIn(f"<a class='tt-pille tt-alle' href='{basis}' target='_self'>← Alle Testtage</a>", self.roh(at))
+                self.assertFalse([b for b in at.button if b.key == "zurueck"])
+        at = self.app(TT_SLUG)  # ohne live_url: bisheriger Knopf zur Streamlit-Übersicht
+        self.assertTrue([b for b in at.button if b.key == "zurueck"])
+        self.assertNotIn("tt-alle'", self.roh(at))
 
     def test_static_live_link_in_overview_but_archive_stays_in_streamlit(self):
         basis = "https://stv-sev.github.io/testtag-public/"
@@ -270,7 +303,7 @@ class AppTests(unittest.TestCase):
         self.assertNotIn(f"?t={ARCHIV_SLUG}'", roh)
         at = self.app(ARCHIV_SLUG, live_url=basis)
         self.assertEqual(at.radio(key="bereich").options, NAV)
-        self.assertNotIn(basis, self.roh(at))
+        self.assertNotIn(f"{basis}?t=", self.roh(at))  # höchstens die Übersicht
         self.assertTrue(self.cards(at))
 
     def test_invalid_static_live_address_keeps_live_in_streamlit(self):
@@ -293,10 +326,10 @@ class AppTests(unittest.TestCase):
         at.run()
         self.assertIn("Dieser Testtag ist nicht verfügbar.", [i.value for i in at.info])
         self.assertEqual(self.raenge(at), [])
-        self.assertNotIn(basis, self.roh(at))
+        self.assertNotIn(f"{basis}?t=", self.roh(at))  # höchstens die Übersicht
         self.assert_clean(at)
         at = self.app("gibt-es-nicht", ansicht="rangliste", live_url=basis)
-        self.assertNotIn(basis, self.roh(at))
+        self.assertNotIn(f"{basis}?t=", self.roh(at))  # höchstens die Übersicht
         self.assertEqual(self.kopf(at), "")
 
     # ── Live ──

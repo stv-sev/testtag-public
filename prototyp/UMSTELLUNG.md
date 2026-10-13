@@ -1,4 +1,47 @@
-# Umstellung Live und Ranglisten auf die statische Seite – Vorbereitung (Branch `umstellung-live-statisch`)
+# Umstellung auf die statische Seite – Vorbereitung (Branch `umstellung-live-statisch`)
+
+## Nachtrag 13.10.2026 abends: alle vier Ansichten und Übersicht statisch
+
+Die statische Seite zeigt jetzt **Live, Ranglisten, Startliste und Zeitplan** eines laufenden Testtags sowie ohne `?t=`
+die **Übersicht** (Live, Demnächst, Archiv). Nur das Archiv bleibt in Streamlit. Nichts ist produktiv umgeschaltet.
+
+- **Startliste/Zeitplan:** Portierung von `app._startliste`/`startliste_tabelle` und `app._zeitplan` (gleiche
+  Gruppierung und CSS). Startliste mit Programmfilter („Alle“ = Streamlit-Ansicht), Zeitplan ohne Filter. Laden beim
+  Öffnen, Änderungsabfrage alle 30 s (statt 5 s), neue Zeilen nur bei geänderter Prüfsumme; gleiche Prüfung,
+  Unterbruch-Hinweis (jetzt relativ zum Takt), Verbergen und Rückfall wie bei Live.
+- **Übersicht:** nur, was die öffentlichen Leserechte liefern (verborgene fehlen); Live/Demnächst →
+  `?t=<slug>` dieser Seite, Archiv → `https://testtag.streamlit.app/?t=<slug>`; alle 60 s aktualisiert.
+  „← Alle Testtage“ führt auf diese Übersicht – auch aus Streamlit, sobald `live_url` gesetzt ist.
+- **Schalter neu:** `docs/config.js` `ansichten: ["rangliste", "startliste", "zeitplan"]` (fehlende → Streamlit) statt
+  `rangliste`; Streamlit-Secret `statische_bereiche = ["rangliste", "startliste", "zeitplan"]` statt
+  `statische_rangliste`. Mit allen dreien zeigt Streamlit für laufende Testtage nur noch Links (keine Daten).
+- **Tests:** pytest 326 bestanden; Browsertest gegen nachgebildete Data API alle Prüfungen bestanden, **107 von 107
+  Ansichten identisch mit Streamlit** (87 Ranglisten, 20 Startliste/Zeitplan); Navigation (alle vier Ansichten,
+  direkte Links, alte Streamlit-Links je Ansicht, 390/1280 px) und Rückfall (alle vier Ansichten) mit echtem
+  Supabase bestanden – **vor** dem Einbau der Übersicht; die Übersicht ist nur gegen die nachgebildete API und in
+  pytest geprüft (Navigationstest mit echten Daten noch offen).
+
+**Messung 50 Zuschauer, statisch** (synthetischer Testtag, Publikation alle 30 s, Seite lokal ausgeliefert):
+
+| | D: Klick Live → Startliste → Zeitplan | D2: Wiederholung | E/F: Link direkt öffnen | Streamlit (gemessen) |
+|---|---|---|---|---|
+| Startliste sichtbar, Median / Max | 0,43 / 0,60 s | 0,35 / 0,52 s | 0,34 / 0,59 s | 114,6 / 115,8 s |
+| Zeitplan sichtbar, Median / Max | 0,12 / 0,19 s | 0,15 / 0,32 s | 0,31 / 0,92 s | 83,5 / 84,7 s |
+| erreicht, Fehler | 50/50, 0 | 50/50, 0 | 50/50, 0 | 50/50 |
+| Daten beim Wechsel (50 Zuschauer) | Startliste 377 KB, Zeitplan 72 KB | 384 / 86 KB | 503 / 180 KB (inkl. Erstaufruf) | – |
+| Anfragen gesamt / Daten (5 min) | 1 402 / 7,8 MB | 1 455 / 8,3 MB | 553 / 550 Anfragen (2,5 min) | – |
+
+Stationär auf Startliste/Zeitplan je Zuschauer: ≈ 210 Anfragen/h und 0,24 MB/h (Live/Rangliste ≈ 2,8 MB/h).
+Supabase-Antwortzeit Median 44–52 ms.
+
+**Umschaltung (zusätzlich zu den Schritten unten):** Secret `statische_bereiche = ["rangliste", "startliste", "zeitplan"]`
+statt `statische_rangliste`. Verteilter Link kann dann auch die Übersicht sein: `https://stv-sev.github.io/testtag-public/`.
+**Rückfall je Ansicht:** Bereich aus `statische_bereiche` entfernen, dann aus `ansichten` in `config.js`; alles:
+`live_url` und `statische_bereiche` löschen, dann `rueckfall: true` (leitet auch `&ansicht=startliste|zeitplan` und die
+Übersicht nach Streamlit um).
+
+---
+
 
 Stand 13.10.2026. Nichts ist produktiv umgeschaltet; `main`, die beworbene Adresse `https://testtag.streamlit.app/`,
 die Pages-Quelle (`prototyp-live-statisch`), die Streamlit-Secrets, Publisher, Excel, Supabase-Schema, RLS und
@@ -61,7 +104,7 @@ produktive Daten sind unverändert.
 | `docs/config.js` | `rangliste: true` | Ranglisten auf der statischen Seite; `false`: Pille und `&ansicht=rangliste` führen in die Streamlit-Rangliste (ohne Datenabruf) |
 | `docs/config.js` | `rueckfall: true` | jeder Aufruf geht vor dem ersten Datenabruf nach Streamlit (`&ansicht=live` bzw. `rangliste`) |
 | Streamlit-Secrets | `live_url` | Live auf der statischen Seite (ohne: alles wie heute in Streamlit) |
-| Streamlit-Secrets | `statische_rangliste = true` | zusätzlich Ranglisten auf der statischen Seite (nur zusammen mit `live_url`) |
+| Streamlit-Secrets | `statische_bereiche = ["rangliste", "startliste", "zeitplan"]` | zusätzlich Ranglisten auf der statischen Seite (nur zusammen mit `live_url`) |
 
 ## Tests
 
@@ -161,7 +204,7 @@ Antwortkopf. Ob Supabase komprimiert oder unkomprimiert zählt, ist weiterhin ni
 3. Streamlit Cloud → App `testtag` → Settings → Secrets ergänzen und speichern:
    ```toml
    live_url = "https://stv-sev.github.io/testtag-public/"
-   statische_rangliste = true
+   statische_bereiche = ["rangliste", "startliste", "zeitplan"]
    ```
 4. Mit Telefon und Laptop durchklicken: Übersicht → Live, Live ⇄ Ranglisten (Programm/AK, drei Ebenen, Details),
    Ranglisten → Startliste/Zeitplan → Ranglisten/Live, alter Link `https://testtag.streamlit.app/?t=<slug>`;

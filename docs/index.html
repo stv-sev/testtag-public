@@ -14,7 +14,7 @@
   <a class="tt-zurueck" id="zurueck" href="#">← Alle Testtage</a>
   <header class="tt-kopf">
     <div class="tt-logo"><img src="logo.png" alt="Turnsport Aargau" width="120" height="40"></div>
-    <div><h1 id="titel">Testtag</h1></div>
+    <div><h1 id="titel">Testtag</h1><div class="tt-unter" id="unter" hidden></div></div>
     <div id="badge"></div>
   </header>
   <div class="tt-stand" id="stand"></div>
@@ -22,8 +22,8 @@
   <nav class="tt-nav" id="nav" hidden>
     <a class="tt-pille aktiv" data-ansicht="live" href="#" aria-current="page">⚡ Live</a>
     <a class="tt-pille" data-ansicht="rangliste" href="#">🏅 Ranglisten</a>
-    <a class="tt-pille" data-ziel="startliste" href="#">📋 Startliste</a>
-    <a class="tt-pille" data-ziel="zeitplan" href="#">🕐 Zeitplan</a>
+    <a class="tt-pille" data-ansicht="startliste" href="#">📋 Startliste</a>
+    <a class="tt-pille" data-ansicht="zeitplan" href="#">🕐 Zeitplan</a>
   </nav>
   <div class="tt-filter" id="filter" hidden>
     <label>Programm<select id="programm"></select></label>
