@@ -641,9 +641,7 @@
   function beamerZeile(r, neu) {
     const technik = r.bereich === "technik";
     const meta = [r.verein, r.programm ? programmText(r.programm) : "", r.ak].filter(Boolean).map(h).join(" · ");
-    const d = new Date(r.geaendert_am);
-    const was = [technik ? r.anzeige : r.test, Number.isNaN(d.getTime()) ? "" : uhrFormat.format(d)].filter(Boolean).map(h)
-      .join(" · ");
+    const was = h(technik ? r.anzeige : r.test);  // Element bzw. Test, ohne Uhrzeit
     return `<div class="tt-bzeile${neu ? " tt-neu" : ""}">`
       + `<div class="tt-btext"><strong>${h(r.vorname)} ${h(r.name)}</strong><small>${meta}</small></div>`
       + `<div class="tt-btext tt-bwas"><strong>${h(geraetName(r))}</strong><small>${was}</small></div>`
