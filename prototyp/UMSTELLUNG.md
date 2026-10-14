@@ -1,4 +1,116 @@
-# Umstellung auf die statische Seite – Vorbereitung (Branch `umstellung-live-statisch`)
+# Umstellung auf die statische Seite (Branch `umstellung-live-statisch`)
+
+Stand 14.10.2026. Nichts ist produktiv umgeschaltet: `main`, die beworbene Adresse `https://testtag.streamlit.app/`,
+die Pages-Quelle (`prototyp-live-statisch`), die Streamlit-Secrets, Excel, Supabase-Schema, RLS und produktive Daten
+sind unverändert. Der folgende Abschnitt ist die einzige gültige Anleitung; die Nachträge weiter unten sind Verlauf
+und Messberichte.
+
+## Anleitung: Freischaltung und Rückfall
+
+### Aufteilung nach der Freischaltung
+
+| Ansicht | Wo | Adresse |
+|---|---|---|
+| Live | statische Seite | `https://stv-sev.github.io/testtag-public/?t=<slug>` (`&p=…&ak=…`) |
+| Ranglisten | statische Seite | `…/?t=<slug>&ansicht=rangliste` (`&p=…&ak=…&art=technik\|athletik`) |
+| Technik „Gerät & Rotation“ | statische Seite | `…&ansicht=rangliste&art=technik&sicht=rotation&g=<Gerät>&r=<Rotation>` |
+| Startliste | statische Seite | `…/?t=<slug>&ansicht=startliste` (`&p=…`) |
+| Zeitplan | statische Seite | `…/?t=<slug>&ansicht=zeitplan` |
+| Übersicht (Live, Demnächst, Archiv) | statische Seite | `https://stv-sev.github.io/testtag-public/` |
+| Archiv | Streamlit | `https://testtag.streamlit.app/?t=<slug>` eines archivierten Testtags |
+
+Streamlit lädt für laufende und bevorstehende Testtage dann keine Daten mehr: Bisherige Links
+`https://testtag.streamlit.app/?t=<slug>` (auch mit `&ansicht=…`) zeigen nur die Pille „… öffnen“ auf die statische
+Seite, die Streamlit-Übersicht je Testtag die Pille „⚡ Live-Resultate“, und „← Alle Testtage“ führt auf die
+statische Übersicht. Archivierte Testtage bleiben vollständig in Streamlit; die statische Seite verlinkt dorthin.
+
+### Schalter
+
+| Ort | Schalter | Wirkung |
+|---|---|---|
+| `docs/config.js` | `ansichten: ["rangliste", "startliste", "zeitplan"]` | Ansichten auf der statischen Seite zusätzlich zu Live. Fehlt eine, führen Pille und Links `&ansicht=…` ohne Datenabruf nach `streamlitUrl/?t=<slug>&ansicht=…` |
+| `docs/config.js` | `rueckfall: false` / `true` | `true`: jeder Aufruf geht vor dem ersten Datenabruf nach Streamlit (`?t=<slug>&ansicht=live\|rangliste\|startliste\|zeitplan`; ohne `?t=` auf die Streamlit-Übersicht) |
+| `docs/config.js` | `streamlitUrl: "https://testtag.streamlit.app"` | Ziel für Archiv, fehlende Ansichten und Rückfall – nicht ändern |
+| Streamlit-Secrets | `live_url = "https://stv-sev.github.io/testtag-public/"` | Live und „← Alle Testtage“ auf der statischen Seite; ohne: alles in Streamlit. Gilt nur als `https://`-Adresse ohne Abfrage |
+| Streamlit-Secrets | `statische_bereiche = ["rangliste", "startliste", "zeitplan"]` | diese Bereiche in Streamlit nur noch als Link auf die statische Seite (nur zusammen mit `live_url`); TOML-Liste, auch teilweise; ein einzelner Text statt einer Liste wird ignoriert |
+
+Auf diesem Branch steht `config.js` bereits auf `ansichten: ["rangliste", "startliste", "zeitplan"]` und
+`rueckfall: false`. Weitere Schalter gibt es nicht.
+
+**Grundregel:** Eine Ansicht ist nur dann statisch, wenn sie in `ansichten` **und** in `statische_bereiche` steht.
+Steht sie nur in `statische_bereiche`, verweist Streamlit auf die statische Seite und diese zurück nach Streamlit –
+Zuschauer pendeln. Steht sie nur in `ansichten`, zeigen beide Seiten sie (unschädlich). Darum:
+**Freischalten: zuerst `config.js`, dann Secrets. Rückfall: zuerst Secrets, dann `config.js`.**
+Live hat keinen eigenen Schalter: Mit `live_url` ist Live statisch; zurück nach Streamlit kommt Live nur mit dem
+vollständigen Rückfall.
+
+### Freischaltung
+
+Voraussetzungen: Der Publisher läuft mit dem Code dieses Branchs (sonst zeigt „Gerät & Rotation“ „nicht verfügbar“;
+alles andere funktioniert). Beide Mappen des Testtags tragen in `Public!B2` denselben Slug (zurzeit offen:
+`261031-Test-AK9-AK12.xlsx` hat noch `aargau-lenzburg-2026-10-09`).
+
+1. Branch nach `main` übernehmen (dein Entscheid). Ohne Secrets ändert sich für Zuschauer in Streamlit nur, dass
+   `&ansicht=` und `&art=` wirken.
+2. GitHub → Settings → Pages: Quelle auf `main` / `/docs` (die Adresse bleibt `https://stv-sev.github.io/testtag-public/`).
+   `prototyp-live-statisch` danach nicht mehr als Quelle. Nach dem Pages-Build (≈ 1 min) prüfen, dass
+   `https://stv-sev.github.io/testtag-public/config.js` `rueckfall: false` und alle drei `ansichten` enthält.
+3. Streamlit Cloud → App `testtag` → Settings → Secrets ergänzen und speichern:
+   ```toml
+   live_url = "https://stv-sev.github.io/testtag-public/"
+   statische_bereiche = ["rangliste", "startliste", "zeitplan"]
+   ```
+4. Mit Telefon und Laptop durchklicken (synthetischer Testtag, danach wieder verbergen):
+   - Übersicht → Testtag.
+   - Live ⇄ Ranglisten ⇄ Startliste ⇄ Zeitplan: Programm und AK bleiben, die Zurück-Taste funktioniert.
+   - Ranglisten: drei Ebenen, gestufte Details, Technik „Gerät & Rotation“ (nur freigegebene Rotationen wählbar).
+   - Bisherige Links `https://testtag.streamlit.app/?t=<slug>` und `…&ansicht=startliste` führen mit einem Klick auf
+     die statische Seite.
+   - Ein archivierter Testtag öffnet Streamlit.
+   - Danach einen Rückfall je Ansicht (unten) durchspielen und wieder aufheben.
+5. Supabase → Usage: Egress der Testtage prüfen (Zählweise komprimiert oder unkomprimiert, siehe Datenverkehr).
+
+**Verteilter Link (QR-Code, Mitteilungen):** `https://stv-sev.github.io/testtag-public/?t=<slug>` (für den 31.10.
+`aargau-lenzburg-2026-10-31`, sobald beide Mappen diesen Slug tragen) oder die Übersicht
+`https://stv-sev.github.io/testtag-public/`. Der bisherige Streamlit-Link bleibt gültig und führt mit einem Klick
+dorthin. Am Morgen des Testtags `https://testtag.streamlit.app/` einmal öffnen, damit die App für das Archiv und
+einen allfälligen Rückfall wach ist.
+
+### Rückfall bei einem Problem
+
+**Eine Ansicht** (Ranglisten, Startliste oder Zeitplan; die übrigen bleiben statisch):
+1. Streamlit-Secrets: den Bereich aus `statische_bereiche` entfernen, z. B.
+   `statische_bereiche = ["rangliste", "zeitplan"]` → die Startliste ist wieder in Streamlit.
+2. `docs/config.js` auf `main`: denselben Bereich aus `ansichten` entfernen, committen, pushen → Pille und Links
+   `&ansicht=startliste` führen ohne Datenabruf nach `https://testtag.streamlit.app/?t=<slug>&ansicht=startliste`.
+
+Beim Rückfall der Ranglisten gibt die Umleitung die Ebene mit. Aus „Gerät & Rotation“ zeigt Streamlit die
+Technik-Rangliste mit dem Hinweis „«Gerät & Rotation» ist in dieser Ansicht nicht verfügbar …“.
+
+**Alles** (auch Live und Übersicht):
+1. Streamlit-Secrets: Zeilen `live_url` und `statische_bereiche` löschen → alles wieder in Streamlit.
+2. `docs/config.js` auf `main`: `rueckfall: true`, committen, pushen → jeder Aufruf der statischen Seite leitet vor
+   dem ersten Datenabruf auf `https://testtag.streamlit.app/?t=<slug>&ansicht=…` um, die Übersicht auf
+   `https://testtag.streamlit.app/`.
+
+Jeweils erst Schritt 1, dann Schritt 2 (sonst pendeln Zuschauer, siehe Grundregel). Die Secrets wirken in Streamlit
+nach dem Speichern. Der Push wirkt nach dem Pages-Build (≈ 1 min); Browser können `config.js` bis 10 min
+zwischenspeichern, und bereits offene Seiten laufen weiter, bis sie neu geladen werden.
+**Aufheben:** umgekehrt – zuerst `config.js` (Bereich wieder in `ansichten` bzw. `rueckfall: false`), nach dem
+Pages-Build die Secrets.
+
+### Geprüft gegen den Code (14.10.2026)
+
+- `docs/config.js` und `docs/live.js`: Schalter `ansichten`, `rueckfall`, `streamlitUrl`; Live wird immer angeboten;
+  fehlende Ansichten und der Rückfall leiten vor dem ersten Datenabruf um (Browsertest `rangliste_test.mjs`, auch mit
+  `ansichten` ohne Ranglisten bzw. ohne Startliste/Zeitplan und mit `rueckfall: true`).
+- `app.py`: Secrets `live_url` (`_live_basis`, nur `https://` ohne Abfrage; `http://localhost` nur für Tests) und
+  `statische_bereiche` (`statische_links`, nur als Liste); weitere Schalter liest Streamlit nicht. pytest u. a.
+  `test_static_ranking_link_replaces_ranking_area_without_loading_data` (teilweise Liste, Text statt Liste, ohne
+  `live_url`), `test_all_areas_static_streamlit_shows_only_links_and_loads_no_data`,
+  `test_rotation_view_falls_back_to_technik_ranking_with_hint`.
+
+---
 
 ## Nachtrag 14.10.2026: gestufte Gesamtdetails, Technik „Gerät & Rotation“
 
@@ -69,9 +181,7 @@ die **Übersicht** (Live, Demnächst, Archiv). Nur das Archiv bleibt in Streamli
 - **Übersicht:** nur, was die öffentlichen Leserechte liefern (verborgene fehlen); Live/Demnächst →
   `?t=<slug>` dieser Seite, Archiv → `https://testtag.streamlit.app/?t=<slug>`; alle 60 s aktualisiert.
   „← Alle Testtage“ führt auf diese Übersicht – auch aus Streamlit, sobald `live_url` gesetzt ist.
-- **Schalter neu:** `docs/config.js` `ansichten: ["rangliste", "startliste", "zeitplan"]` (fehlende → Streamlit) statt
-  `rangliste`; Streamlit-Secret `statische_bereiche = ["rangliste", "startliste", "zeitplan"]` statt
-  `statische_rangliste`. Mit allen dreien zeigt Streamlit für laufende Testtage nur noch Links (keine Daten).
+- **Schalter:** `ansichten` in `docs/config.js` und Secret `statische_bereiche` (siehe Anleitung).
 - **Tests:** pytest 326 bestanden; Browsertest gegen nachgebildete Data API alle Prüfungen bestanden, **107 von 107
   Ansichten identisch mit Streamlit** (87 Ranglisten, 20 Startliste/Zeitplan); Navigation (alle vier Ansichten,
   direkte Links, alte Streamlit-Links je Ansicht, 390/1280 px) und Rückfall (alle vier Ansichten) mit echtem
@@ -91,54 +201,13 @@ die **Übersicht** (Live, Demnächst, Archiv). Nur das Archiv bleibt in Streamli
 Stationär auf Startliste/Zeitplan je Zuschauer: ≈ 210 Anfragen/h und 0,24 MB/h (Live/Rangliste ≈ 2,8 MB/h).
 Supabase-Antwortzeit Median 44–52 ms.
 
-**Umschaltung (zusätzlich zu den Schritten unten):** Secret `statische_bereiche = ["rangliste", "startliste", "zeitplan"]`
-statt `statische_rangliste`. Verteilter Link kann dann auch die Übersicht sein: `https://stv-sev.github.io/testtag-public/`.
-**Rückfall je Ansicht:** Bereich aus `statische_bereiche` entfernen, dann aus `ansichten` in `config.js`; alles:
-`live_url` und `statische_bereiche` löschen, dann `rueckfall: true` (leitet auch `&ansicht=startliste|zeitplan` und die
-Übersicht nach Streamlit um).
-
----
-
-
-Stand 13.10.2026. Nichts ist produktiv umgeschaltet; `main`, die beworbene Adresse `https://testtag.streamlit.app/`,
-die Pages-Quelle (`prototyp-live-statisch`), die Streamlit-Secrets, Publisher, Excel, Supabase-Schema, RLS und
-produktive Daten sind unverändert.
-
-## Aufteilung
-
-| Ansicht | Wo | Adresse |
-|---|---|---|
-| Live | statische Seite | `https://stv-sev.github.io/testtag-public/?t=<slug>` (`&p=…&ak=…`) |
-| Ranglisten | statische Seite | `…/?t=<slug>&ansicht=rangliste` (`&p=…&ak=…&art=technik\|athletik`) |
-| Startliste, Zeitplan | Streamlit | `https://testtag.streamlit.app/?t=<slug>&ansicht=startliste\|zeitplan` |
-| Übersicht, Archiv | Streamlit | `https://testtag.streamlit.app/` bzw. `?t=<slug>` eines archivierten Testtags |
-
-## Navigation
-
-| Von | Nach | Weg |
-|---|---|---|
-| Statisch Live ⇄ Ranglisten | gleicher Testtag | Pillen; Wechsel **ohne Neuladen** der Seite, Programm/AK bleiben, Zurück-Taste führt zur vorherigen Ansicht |
-| Statische Seite | Startliste / Zeitplan | `https://testtag.streamlit.app/?t=<slug>&ansicht=startliste` (`zeitplan`) |
-| Statische Seite | Übersicht | „← Alle Testtage“ → `https://testtag.streamlit.app/` |
-| Streamlit-Testtag | Live / Ranglisten | Pillen „⚡ Live“, „🏅 Ranglisten“ → `<live_url>?t=<slug>` bzw. `…&ansicht=rangliste` (gleicher Tab) |
-| Streamlit-Übersicht | Live | Pille „⚡ Live-Resultate“ je Testtag (nicht im Archiv) |
-| Bestehender Link `?t=<slug>` (Streamlit) | – | Hinweis „Live-Resultate öffnen“, mit `&ansicht=rangliste` „Ranglisten öffnen“ – ohne Datenabruf |
-
-- **Auswahl beim Wechsel:** Ranglisten haben kein „Alle“ (wie Streamlit). Live „Alle“ → Rangliste zeigt das erste
-  Programm und dessen erste AK; die Live-Auswahl „Alle“ bleibt beim Zurückwechseln erhalten. Eine in der Rangliste
-  gewählte AK gilt danach auch für Live. Streamlit kennt weiterhin keine Filter in der Adresse; nach Startliste und
-  Zeitplan wird deshalb nur der Testtag übergeben.
-- **Archiv:** archivierte Testtage bleiben vollständig in Streamlit; die statische Seite zeigt nur den Link ins
-  Archiv (aus den Ranglisten mit `&ansicht=rangliste`).
-- **Unbekannt/verborgen:** beide Seiten zeigen „Dieser Testtag ist nicht verfügbar.“ ohne Navigation und ohne Daten;
-  die statische Seite verwirft bereits geladene Daten sofort.
-
 ## Statische Rangliste
 
 - **Darstellung:** Portierung von `app.rang_karte` und `quelle.turner_details` (`docs/rangliste.js`): Programm, AK,
   Ebenen Gesamt/Technik/Athletik, kompakte Zeile (Rang, Turner, Verein, Total), Details erst nach Antippen;
-  Gesamt mit Gerätetotalen, Total Technik/Athletik und Gesamt; Technik je Gerät aufklappbar mit Linien S/T und
-  „(Alternative)“ beim Sprung; Athletik je Test, Total Beweglichkeit/Kraft/Athletik. Gleiche CSS-Regeln wie `app.py`.
+  Gesamt gestuft (Total Technik → Geräte → Linien, Total Athletik → Kraft/Beweglichkeit → Tests, Gesamt);
+  Technik je Gerät aufklappbar mit Linien S/T und „(Alternative)“ beim Sprung; Athletik je Test, Total
+  Beweglichkeit/Kraft/Athletik. Gleiche CSS-Regeln wie `app.py`.
 - **Keine eigene Rangberechnung:** Reihenfolge, Ränge, Punkte und Totale stammen aus der Publikation. Wie in
   Streamlit werden nur Gerätetotale als Summe der veröffentlichten Linienpunkte gebildet; passt die Aufschlüsselung
   nicht exakt zu den Totalen, steht „Die Aufschlüsselung ist zurzeit nicht verfügbar.“ Fehlende Werte „–“,
@@ -154,33 +223,23 @@ produktive Daten sind unverändert.
   niemand den nächsten Takt – die Seite blieb auf dem Stand stehen (im Lasttest 1 von 50 Sitzungen; betraf auch
   den bisherigen Live-Prototyp beim Filterwechsel). Jetzt wird der Takt sofort nachgeholt (Regressionstest).
 
-## Schalter
-
-| Ort | Schalter | Wirkung |
-|---|---|---|
-| `docs/config.js` | `rangliste: true` | Ranglisten auf der statischen Seite; `false`: Pille und `&ansicht=rangliste` führen in die Streamlit-Rangliste (ohne Datenabruf) |
-| `docs/config.js` | `rueckfall: true` | jeder Aufruf geht vor dem ersten Datenabruf nach Streamlit (`&ansicht=live` bzw. `rangliste`) |
-| Streamlit-Secrets | `live_url` | Live auf der statischen Seite (ohne: alles wie heute in Streamlit) |
-| Streamlit-Secrets | `statische_bereiche = ["rangliste", "startliste", "zeitplan"]` | zusätzlich Ranglisten auf der statischen Seite (nur zusammen mit `live_url`) |
-
 ## Tests
 
-- `python -m pytest tests` – 324 Tests (neu: Schalter `statische_rangliste`).
+Stand 14.10.2026 (Einzelheiten in den Nachträgen):
+- `python -m pytest tests` – 328 Tests, drei volle Läufe hintereinander grün; darin die Secrets `live_url` und
+  `statische_bereiche` (alle, teilweise, ungültig) und der Rückfall aus „Gerät & Rotation“.
 - `rangliste_daten.py` + `rangliste_test.mjs` (Chromium gegen nachgebildete Data API, nur synthetische Stände):
-  **87 von 87 Ranglisten identisch mit der Streamlit-Darstellung** (Text aus `app.rang_karte`), 5 Stände: Rotationsgrenze
-  (nur Rotation 1–2), alle Rotationen, Korrektur (Rang- und Totaländerung, erstes Resultat einer leeren Person),
-  ältere Publikation ohne `struktur` mit widersprüchlichem Total, vollständiger Testtag (108 Personen); beide
-  Programme, alle AK, alle drei Ebenen, Gleichstände, Nullwertung, fehlende Resultate, Sprung-Alternativen.
-  Dazu: Wechsel ohne Neuladen und mit nur einer Anfrage, Adresse, Zurück/Vorwärts, Korrektur während der Anzeige mit
-  offenen Details, offline, Prüfsummenfehler (verfälschter Inhalt nie angezeigt), verborgen (keine Namen im DOM),
-  Archivlink, 390 px und 1280 px ohne waagrechte Scrollbar, `rangliste:false`, `rueckfall:true`, Takt während eines
-  langsamen Wechsels – alle bestanden.
-- `pruefsumme_test.mjs` – 73/73 synthetische Zeilen (davon 29 Ranglisten) identisch.
-- `navigation_test.mjs` – lokal, Streamlit dieses Branchs mit `live_url` und `statische_rangliste`, synthetischer
-  Testtag in Supabase, 390 × 844 und 1280 × 900: alle Wege der Tabelle oben – bestanden.
-- `rueckfall_test.mjs` – `rueckfall: true`, Streamlit ohne beide Secrets: Umleitung ohne Supabase-Abruf auf Live
-  bzw. Ranglisten in Streamlit – bestanden.
-- `funktionstest.mjs` – Live unverändert (Filter, offline, verborgen) – bestanden.
+  **126 von 126 Ansichten identisch mit der Streamlit-Darstellung** (102 Ranglisten, übrige Startliste/Zeitplan);
+  Stände Freigabe 0, Rotationsgrenze, alle Rotationen, Korrektur, ältere Publikation ohne `struktur`, vollständiger
+  Testtag (108 Personen). Dazu Wechsel ohne Neuladen, Adresse, Zurück/Vorwärts, Korrektur mit offenen Details,
+  offline, Prüfsummenfehler, verborgen, Archivlink, 390/1280 px, Schalter `ansichten` (fehlende Ansicht → Streamlit
+  ohne Datenabruf) und `rueckfall: true` (alle vier Ansichten, „Gerät & Rotation“ mit Ebene) – alle bestanden.
+- `pruefsumme_test.mjs` – Prüfsummen von `live.js` gleich wie beim Publisher (synthetische Zeilen).
+- `navigation_test.mjs` – Streamlit mit `live_url` und `statische_bereiche = ["rangliste", "startliste", "zeitplan"]`,
+  synthetischer Testtag in Supabase: alle Wege zwischen den vier Ansichten, alte Streamlit-Links je Ansicht.
+- `rueckfall_test.mjs` – `rueckfall: true`, Streamlit ohne `live_url`/`statische_bereiche`: Umleitung ohne
+  Supabase-Abruf auf die jeweilige Ansicht in Streamlit.
+- `funktionstest.mjs` – Live (Filter, offline, verborgen).
 
 ## Messung: 50 Zuschauer wechseln zur Rangliste
 
@@ -209,7 +268,7 @@ Synthetischer Testtag (108 Personen, 4 301 Live-Resultate), Publikation alle 30 
 - **Lauf A** deckte den Takt-Fehler auf (eine Sitzung blieb nach dem Wechsel stehen); C ist die Wiederholung mit
   Korrektur.
 
-## Startliste und Zeitplan in Streamlit (gemessen)
+## Startliste und Zeitplan in Streamlit (gemessen vor der statischen Umsetzung)
 
 Produktive Streamlit-App (Code von `main`), synthetischer Testtag, 50 Sitzungen öffnen innerhalb von 2,5 s den Testtag
 und wechseln zur Startliste bzw. zum Zeitplan, Publikation alle 30 s, je 4 min (`streamlit_wechsel.py … startliste`
@@ -222,17 +281,14 @@ bzw. `zeitplan`), 13.10.2026 ab 16:22:
 | Laufdauer je 5-s-Takt, Median / Max | 45,3 / 54,2 s | 28,8 / 55,4 s | 14,1–14,9 / 32,6–34,1 s |
 | erreicht / Trennungen | 50/50 / 0 | 50/50 / 0 | – |
 
-- **Ja, das bleibt ein relevantes Risiko.** Streamlit führt für einen Live-Testtag auch Startliste und Zeitplan
-  alle 5 s für jede Sitzung neu aus; bei 50 Sitzungen staut sich das in einem Prozess. Die Startliste (alle
-  108 Personen in Tabellen) ist dabei teurer als eine Rangliste einer AK.
+- Streamlit führt für einen Live-Testtag auch Startliste und Zeitplan alle 5 s für jede Sitzung neu aus; bei
+  50 Sitzungen staut sich das in einem Prozess. Die Startliste (alle 108 Personen in Tabellen) ist dabei teurer als
+  eine Rangliste einer AK.
 - Einschränkungen: Die App war an diesem Nachmittag langsamer als am Morgen (schon 2 Sitzungen brauchten 7–12 s je
   Lauf); die Werte sind daher eher pessimistisch, die Grössenordnung aber eindeutig. Der erste Lauf jeder Sitzung
   zeichnete auf `main` noch Live (4 301 Resultate); mit `live_url` entfällt das, der 5-s-Takt bleibt.
-- Wahrscheinlichkeit: Startliste und Zeitplan ändern sich selten und werden kaum von allen gleichzeitig geöffnet –
-  am ehesten vor Beginn (Zeitplan, Startgruppen). Mit Live und Ranglisten statisch bleiben in Streamlit nur diese
-  Besuche; einzelne Zuschauer sind unproblematisch.
-- Mögliche Abhilfen (nicht umgesetzt, Entscheid offen): Startliste und Zeitplan ohne 5-s-Takt anzeigen (Inhalt ändert
-  sich selten; kleine Änderung in `app.py`) oder ebenfalls statisch machen (gleiche Technik wie Ranglisten).
+- Folge: Startliste und Zeitplan sind seit dem Nachtrag vom 13.10.2026 abends ebenfalls statisch
+  (Messung dort: 0,1–0,9 s); Streamlit zeigt sie nur noch im Rückfall.
 - Eine erste Startliste/Zeitplan-Messung ist verworfen: Die Erkennung zählte den Stilblock mit, und ein
   abgebrochener Lauf überlappte die Wiederholung.
 
@@ -251,45 +307,6 @@ Live liegt in derselben Grössenordnung (bisher 2,4 MB/h; die Kopfzeilen enthalt
 Supabase Free: 5 GB Egress pro Monat. Gezählt sind hier die übertragenen, gzip-komprimierten Bytes inklusive
 Antwortkopf. Ob Supabase komprimiert oder unkomprimiert zählt, ist weiterhin nicht geklärt (unkomprimiert rund
 15-mal mehr) – vor dem 31.10. im Dashboard prüfen.
-
-## Ablauf bis zum 31. Oktober
-
-**Vor dem Testtag testen** (mit synthetischem Testtag, danach wieder verbergen):
-1. Branch nach `main` übernehmen (dein Entscheid) – ohne Secrets ändert sich für Zuschauer nur, dass `&ansicht=` wirkt.
-2. GitHub → Settings → Pages: Quelle auf `main` / `/docs` umstellen (Adresse bleibt
-   `https://stv-sev.github.io/testtag-public/`). `prototyp-live-statisch` danach nicht mehr als Quelle.
-3. Streamlit Cloud → App `testtag` → Settings → Secrets ergänzen und speichern:
-   ```toml
-   live_url = "https://stv-sev.github.io/testtag-public/"
-   statische_bereiche = ["rangliste", "startliste", "zeitplan"]
-   ```
-4. Mit Telefon und Laptop durchklicken: Übersicht → Live, Live ⇄ Ranglisten (Programm/AK, drei Ebenen, Details),
-   Ranglisten → Startliste/Zeitplan → Ranglisten/Live, alter Link `https://testtag.streamlit.app/?t=<slug>`;
-   einmal den Rückfall (unten) durchspielen und wieder aufheben.
-5. Supabase → Usage: Egress der Messtage prüfen (Zählweise).
-
-**Verteilter Link (QR-Code, Mitteilungen):** `https://stv-sev.github.io/testtag-public/?t=aargau-lenzburg-2026-10-09`
-– öffnet Live, Ranglisten eine Pille weiter; beides ohne Streamlit-Prozess und ohne Schlafmodus. Der bisherige Link
-`https://testtag.streamlit.app/?t=aargau-lenzburg-2026-10-09` bleibt gültig und führt mit einem Klick dorthin.
-
-**Am Morgen des Testtags:** `https://testtag.streamlit.app/` öffnen, damit die App wach ist (Startliste, Zeitplan,
-Übersicht); Live-Seite und eine Rangliste kurz prüfen.
-
-## Rückfall bei einem Problem
-
-Nur die Rangliste (Live bleibt statisch):
-1. Streamlit-Secrets: Zeile `statische_rangliste` löschen → Ranglisten wieder in Streamlit.
-2. `docs/config.js` auf `main`: `rangliste: false`, committen, pushen → die Pille und Links mit
-   `&ansicht=rangliste` führen nach Streamlit.
-
-Alles (Live und Ranglisten):
-1. Streamlit-Secrets: Zeilen `live_url` und `statische_rangliste` löschen → alles wieder in Streamlit.
-2. `docs/config.js` auf `main`: `rueckfall: true`, committen, pushen → der verteilte Link leitet auf
-   `https://testtag.streamlit.app/?t=<slug>&ansicht=live` (bzw. `rangliste`) um.
-
-Jeweils erst Schritt 1, dann 2 (sonst zeigt Streamlit kurz den Hinweis auf die statische Seite). Nach dem Push
-wirkt die Änderung nach dem Pages-Build (≈ 1 min); Browser können `config.js` bis 10 min zwischenspeichern, bereits
-offene Seiten laufen weiter, bis sie neu geladen werden. Aufheben: umgekehrt.
 
 ## Ansichtswechsel Streamlit (Messung vom 13.10.2026, Grundlage dieser Ergänzung)
 
