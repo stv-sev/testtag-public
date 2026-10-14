@@ -600,7 +600,9 @@ Einzelpfade; beides zugleich wird abgewiesen). Gilt für Publisher, `--check` un
 
 Eigene Pille auf der statischen Seite (Reihenfolge: Live · Gerät · Ranglisten · Startliste · Zeitplan). Wählbar sind
 Programm, Gerät, Rotation und optional die AK. Gezeigt wird die Riege, die in dieser Rotation an diesem Gerät turnt,
-in Startreihenfolge – auch ohne Note; bei veröffentlichten Resultaten Gerätetotal und Linien S/T, ohne Ränge. Geräte
+in Startreihenfolge – auch ohne Note, ohne Ränge. Antippen zeigt Gerätetotal und **alle für die AK des Turners
+vorgesehenen Linien** mit S/T; noch nicht gewertete mit „–“ (Gliederung aus `struktur` der Ranglistenzeile der AK,
+wie in den Ranglisten; Sprung: die gewählte Alternative bzw. beide mit „(Alternative)“, solange keine gewertet ist). Geräte
 sind alle Stationen der Startliste, auch **Beweglichkeit** (dort Total Beweglichkeit und die Einzeltests statt S/T;
 bei externer Erfassung ohne Station, z. B. AK9–AK12, gibt es kein Gerät Beweglichkeit). Wählbar
 sind nur Rotationen 1 bis zur Freigabe (`Public!B5`), auch über die Adresse; sinkt die Freigabe, wird eine nicht mehr

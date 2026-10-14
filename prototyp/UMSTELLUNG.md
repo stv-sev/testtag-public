@@ -113,6 +113,13 @@ Pages-Build die Secrets.
 
 ---
 
+## Nachtrag 14.10.2026 abends: „Gerät“ zeigt alle vorgesehenen Linien
+
+Beim Antippen eines Turners stehen alle Linien seiner AK am gewählten Gerät (bzw. alle Beweglichkeitstests), noch
+nicht gewertete mit „–“. Quelle ist die bereits publizierte Gliederung (`struktur`) der Ranglistenzeilen; dieselbe
+Logik wie in den Ranglisten (`rangliste.js`, `geraetZeilen`). Kein Publisher-Lauf nötig. Browsertest 120 Prüfungen
+bestanden, 126/126 wie Streamlit.
+
 ## Nachtrag 14.10.2026 nachmittags: Fehler blockiert nur sein Programm
 
 - **Anlass:** Externe Kraftwerte AK9–AK12 erschienen nicht. Ursache: Der Dauer-Publisher wies ab 14:51 jede Änderung

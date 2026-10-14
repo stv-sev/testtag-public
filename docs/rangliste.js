@@ -107,6 +107,50 @@
     return out;
   }
 
+  // Linien eines gegliederten Geräts: fehlende Werte „–“; Sprung: nur die gewählte Alternative, solange keine gewertet
+  // ist beide mit „(Alternative)“. codes = gezeigte Linien (für nicht gegliederte Resultate).
+  function geraetLinien(geraet, technik) {
+    const linienSoll = liste(geraet.linien).filter(istObjekt);
+    const gewaehlt = linienSoll.some((li) => wahr(li.alternative) && technik.has(pyStr(li.code)));
+    const linien = [];
+    const codes = [];
+    for (const linie of linienSoll) {
+      const code = pyStr(linie.code);
+      const r = technik.get(code);
+      if (wahr(linie.alternative) && gewaehlt && !r) continue;  // die andere Sprung-Alternative wurde gewählt
+      codes.push(code);
+      linien.push({ anzeige: linie.anzeige ?? null, S: r ? r.S ?? null : null, T: r ? r.T ?? null : null,
+        alternative: wahr(linie.alternative) && !r });
+    }
+    const werte = linienSoll.filter((li) => technik.has(pyStr(li.code))).map((li) => technik.get(pyStr(li.code)).T);
+    return { geraet: geraet.geraet ?? null, total: summe(werte), linien, codes };
+  }
+
+  // „Gerät“: alle vorgesehenen Linien (bzw. Beweglichkeitstests) eines Geräts für einen Turner, aus der Gliederung
+  // seiner AK; veröffentlichte Werte eingesetzt, fehlende „–“. null = keine Gliederung → nur Veröffentlichtes zeigen.
+  function geraetZeilen(struktur, name, eigene, bereich = "technik") {
+    if (!istObjekt(struktur)) return null;
+    if (bereich === "beweglichkeit") {
+      const tests = liste(struktur.beweglichkeit).filter(istObjekt);
+      if (!tests.length) return null;
+      const eigen = new Map(eigene.filter((r) => r.bereich === "beweglichkeit").map((r) => [pyStr(r.code), r]));
+      const zeilen = tests.map((t) => ({ test: t.test ?? null, punkte: eigen.has(pyStr(t.code)) ? eigen.get(pyStr(t.code)).punkte ?? null : null }));
+      const bekannt = new Set(tests.map((t) => pyStr(t.code)));
+      for (const [c, r] of [...eigen].sort(([x], [y]) => vergleicheNatuerlich(x, y))) {
+        if (!bekannt.has(c)) zeilen.push({ test: r.test ?? null, punkte: r.punkte ?? null });
+      }
+      return { zeilen };
+    }
+    const geraet = liste(struktur.geraete).find((g) => istObjekt(g) && g.geraet === name);
+    if (!geraet) return null;
+    const technik = new Map(eigene.filter((r) => r.bereich === "technik").map((r) => [pyStr(r.code), r]));
+    const { linien, codes } = geraetLinien(geraet, technik);
+    for (const [c, r] of [...technik].sort(([x], [y]) => vergleicheNatuerlich(x, y))) {
+      if (!codes.includes(c)) linien.push({ anzeige: r.anzeige ?? null, S: r.S ?? null, T: r.T ?? null, alternative: false });
+    }
+    return { linien };
+  }
+
   // quelle.turner_details: Aufschlüsselung eines Eintrags; null = nicht widerspruchsfrei darstellbar.
   function details(eintrag, eigene, struktur, alle) {
     struktur = istObjekt(struktur) ? struktur : abgeleiteteStruktur(alle);
@@ -133,19 +177,9 @@
     const zugeordnet = new Set();
     for (const geraet of liste(struktur.geraete)) {
       if (!istObjekt(geraet)) continue;
-      const linienSoll = liste(geraet.linien).filter(istObjekt);
-      const gewaehlt = linienSoll.some((li) => wahr(li.alternative) && technik.has(pyStr(li.code)));
-      const linien = [];
-      for (const linie of linienSoll) {
-        const code = pyStr(linie.code);
-        const r = technik.get(code);
-        if (wahr(linie.alternative) && gewaehlt && !r) continue;  // die andere Sprung-Alternative wurde gewählt
-        zugeordnet.add(code);
-        linien.push({ anzeige: linie.anzeige ?? null, S: r ? r.S ?? null : null, T: r ? r.T ?? null : null,
-          alternative: wahr(linie.alternative) && !r });
-      }
-      const werte = linienSoll.filter((li) => technik.has(pyStr(li.code))).map((li) => technik.get(pyStr(li.code)).T);
-      geraete.push({ geraet: geraet.geraet ?? null, total: summe(werte), linien });
+      const g = geraetLinien(geraet, technik);
+      for (const code of g.codes) zugeordnet.add(code);
+      geraete.push({ geraet: g.geraet, total: g.total, linien: g.linien });
     }
     const rest = [...technik].filter(([c]) => !zugeordnet.has(c)).map(([, r]) => r)
       .sort((a, b) => vergleicheNatuerlich(pyStr(a.code), pyStr(b.code)));
@@ -251,5 +285,6 @@
   }
 
   const ziel = typeof window !== "undefined" ? window : globalThis;
-  ziel.TT_RANGLISTE = Object.freeze({ ARTEN, ART_TEXT, details, karte, liste: liste_html, hatResultate, geraete, zahl, summe });
+  ziel.TT_RANGLISTE = Object.freeze({ ARTEN, ART_TEXT, details, karte, liste: liste_html, hatResultate, geraete, zahl, summe,
+    geraetZeilen });
 })();

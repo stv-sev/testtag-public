@@ -310,6 +310,13 @@ const gezeichnet = {};
   const noten = await page.locator("#inhalt .tt-rangkarte .tt-note").allTextContents();
   pruefe(pferd.length === 2 && pferd[0].startsWith("Max ") && pferd[1].startsWith("Nina "),
     `Pferd, Rotation 1: Riege Pferd in Startreihenfolge (${pferd.join(", ")})`);
+  // alle vorgesehenen Linien: noch nicht gewertet mit „–“
+  const nina = page.locator(".tt-rangkarte", { hasText: "Nina" });
+  await nina.locator("summary").click();
+  const ninaText = (await nina.innerText()).replace(/\s+/g, " ");
+  pruefe(ninaText.includes("Gerätetotal Pferd –") && ninaText.includes("Synth Scheren S – T –"),
+    `ohne Note: vorgesehene Linie mit „–“ (${ninaText.slice(0, 110)})`);
+  await nina.locator("summary").click();
   pruefe(JSON.stringify(noten) === JSON.stringify(["6", "–"]), `auch ohne Note gelistet (${noten.join(", ")})`);
   await page.selectOption("#ak", "AK 6");
   await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("· AK 6"));
@@ -330,10 +337,33 @@ const gezeichnet = {};
   const bew = (await page.locator(".tt-rangkarte", { hasText: "Lea" }).innerText()).replace(/\s+/g, " ");
   pruefe(bew.includes("Total Beweglichkeit 0") && bew.includes("Bücke 0") && !bew.includes(" S ") && !bew.includes("T "),
     `Beweglichkeit: Total und Einzeltests statt S/T (${bew.slice(0, 120)})`);
+  pruefe(bew.includes("Arm-Rumpf-Winkel rücklings –"), "Beweglichkeit: alle vorgesehenen Tests, fehlende mit „–“");
+  // Linie nur für bestimmte AK: Nina (AK 6) am Boden ohne „Synth Boden rückwärts“, Lea (AK 7) mit
+  await page.goto(adresse("&ansicht=geraet&p=AK5-AK9%2B&g=Boden&r=8"));
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Rotation 8 · Boden"));
+  const ninaBoden = page.locator(".tt-rangkarte", { hasText: "Nina" });
+  await ninaBoden.locator("summary").click();
+  const nb = (await ninaBoden.innerText()).replace(/\s+/g, " ");
+  pruefe(nb.includes("Synth Boden vorwärts") && !nb.includes("Synth Boden rückwärts"),
+    `für AK 6 nicht vorgesehene Linie fehlt (${nb.slice(0, 110)})`);
+  // Sprung AK9–AK12: AK 9 „Sprung 1/2“; AK 10–12 genau eine gewertete Alternative oder beide „(Alternative)“
+  const sprung = [];
+  for (let r = 1; r <= 7; r++) {
+    await page.goto(adresse(`&ansicht=geraet&p=AK9-AK12&g=Sprung&r=${r}`));
+    await page.waitForFunction((rr) => document.getElementById("inhalt").textContent.includes(`Rotation ${rr} · Sprung`), r);
+    for (const karte of await page.locator(".tt-rangkarte").all()) {
+      await karte.locator("summary").click();
+      sprung.push((await karte.innerText()).replace(/\s+/g, " "));
+    }
+  }
+  const okSprung = sprung.every((t) => (t.includes("AK 9") ? t.includes("Sprung 1") && t.includes("Sprung 2")
+    : (t.match(/\(Alternative\)/g) || []).length === 2 || ["Tsukahara", "Yurchenko"].filter((x) => t.includes(x)).length === 1));
+  pruefe(sprung.length > 0 && okSprung, `Sprung: ${sprung.length} Turner, Linien je AK und Alternativen korrekt`);
   sb.stand = staende.r2;
   await page.goto(adresse("&ansicht=geraet&p=AK5-AK9%2B&g=Beweglichkeit&r=1"));
   await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Rotation 1 · Beweglichkeit"));
-  pruefe(!(await text()).includes("Bücke"), "Beweglichkeit, Freigabe 2: keine Testpunkte aus nicht freigegebenen Rotationen");
+  pruefe((await text()).includes("Bücke –") && !/Bücke \d/.test(await text()),
+    "Beweglichkeit, Freigabe 2: Tests vorgesehen („–“), keine Punkte aus nicht freigegebenen Rotationen");
   // Freigabe sinkt: Rotation 8 gewählt, neue Publikation mit Freigabe 2 → Auswahl verworfen
   sb.stand = staende.r8;
   await page.goto(adresse("&ansicht=geraet&p=AK5-AK9%2B&g=Boden&r=8"));

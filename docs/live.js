@@ -197,7 +197,8 @@
   }
 
   // Bereiche der Kopfzeilen je angebotener Ansicht („Gerät“: Einteilung der Startliste und Live-Resultate).
-  const BEREICHE = { live: [LIVE], geraet: [STARTLISTE, LIVE], rangliste: [RANGLISTE], startliste: [STARTLISTE], zeitplan: [ZEITPLAN] };
+  const BEREICHE = { live: [LIVE], geraet: [STARTLISTE, LIVE, RANGLISTE], rangliste: [RANGLISTE], startliste: [STARTLISTE],
+    zeitplan: [ZEITPLAN] };
   const bereiche = () => [...new Set([...z.ansichten].flatMap((a) => BEREICHE[a]))];
   const bereichFilter = (b) => (b.length === 1 ? `eq.${b[0]}` : `in.(${b.join(",")})`);
 
@@ -257,11 +258,11 @@
   }
 
   function benoetigt(kp) {
-    if (ansicht === "geraet") {
+    if (ansicht === "geraet") {  // Einteilung, Resultate und – für alle vorgesehenen Linien – die Gliederung je AK
       const { programm, ak } = geraeteAuswahl(kp);
       if (!programm) return [];
       return [...kp.entries()].filter(([, k]) => k.programm === programm && (k.bereich === STARTLISTE
-        || (k.bereich === LIVE && (ak === ALLE || k.ak === ak)))).map(([s]) => s);
+        || ((k.bereich === LIVE || k.bereich === RANGLISTE) && (ak === ALLE || k.ak === ak)))).map(([s]) => s);
     }
     if (ansicht === "startliste") {
       const { programm } = startlistenAuswahl(kp);
@@ -680,7 +681,7 @@
       : r.bereich === "technik" && r.geraet === geraet && Number.isInteger(r.rotation) && r.rotation <= rot.freigegeben);
     const resultate = new Map();
     for (const s of schl) {
-      for (const r of zeilen.get(s).resultate || []) {
+      for (const r of zeilen.get(s).resultate || []) {  // nur Live-Zeilen haben Resultate
         if (!passt(r)) continue;
         if (!resultate.has(r.teilnehmer)) resultate.set(r.teilnehmer, []);
         resultate.get(r.teilnehmer).push(r);
@@ -698,11 +699,15 @@
       const eigene = (resultate.get(t.teilnehmer) || []).slice()
         .sort((a, b) => String(a.code).localeCompare(String(b.code), "de", { numeric: true }));
       const total = eigene.length ? R.summe(eigene.map((r) => (beweglichkeit ? r.punkte : r.T))) : null;
-      const linien = eigene.map((r) => (beweglichkeit
+      // alle für die AK vorgesehenen Linien (Gliederung der Ranglistenzeile), sonst nur die veröffentlichten
+      const rl = zeilen.get(schluessel(RANGLISTE, programm, t.ak));
+      const gz = R.geraetZeilen(rl && rl.struktur, geraet, eigene, beweglichkeit ? "beweglichkeit" : "technik");
+      const posten = gz ? (beweglichkeit ? gz.zeilen : gz.linien) : eigene;
+      const linien = posten.map((r) => (beweglichkeit
         ? `<div class='tt-linie'><span>${h(r.test)}</span><b class='tt-st'>${h(R.zahl(r.punkte))}</b></div>`
-        : `<div class='tt-linie'><span>${h(r.anzeige)}</span><span class='tt-st'>S ${h(R.zahl(r.S))}</span>`
-          + `<b class='tt-st'>T ${h(R.zahl(r.T))}</b></div>`)).join("");
-      const inhalt = eigene.length
+        : `<div class='tt-linie'><span>${h(r.anzeige)}${r.alternative ? " (Alternative)" : ""}</span>`
+          + `<span class='tt-st'>S ${h(R.zahl(r.S))}</span><b class='tt-st'>T ${h(R.zahl(r.T))}</b></div>`)).join("");
+      const inhalt = posten.length
         ? `<div class='tt-dz tt-total'><span>${beweglichkeit ? "Total Beweglichkeit" : `Gerätetotal ${h(geraet)}`}</span>`
           + `<b>${h(R.zahl(total))}</b></div><div class='tt-linien'>${linien}</div>`
         : "<div class='tt-dhinweis'>Noch kein veröffentlichtes Resultat an diesem Gerät.</div>";
