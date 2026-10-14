@@ -5,7 +5,9 @@ Ablauf einer echten Publikation (`publish`):
 1. Excel-Stand validieren (P1B `build_state`) – vor jedem Netzwerkzugriff.
 2. Testtag (über den Slug) und die verwalteten Publikationszeilen mit dem Secret Key lesen.
 3. Vorherigen Live-Stand aus `resultate_live` rekonstruieren und mit `merge_live` zusammenführen.
-4. Gewünschten Gesamtstand berechnen; nicht mehr gewünschte verwaltete Zeilen werden zu Tombstones.
+4. Gewünschten Gesamtstand berechnen; nicht mehr gewünschte verwaltete Zeilen werden zu Tombstones. Ein
+   fehlerhaftes Programm wird blockiert: seine bisherigen Zeilen (und sein Block im Zeitplan) bleiben unverändert,
+   die übrigen Programme werden publiziert (`build_state(teilweise=True)`).
 5. Nur neue oder geänderte Zeilen bestimmen (Primärschlüssel, Prüfsumme und kanonischer Inhalt).
 6. Alle Änderungen in genau einem Batch-Upsert schreiben (eine PostgREST-Anfrage, ein SQL-Statement).
 7. Mit dem Publishable Key öffentlich zurücklesen und vollständig prüfen.
@@ -27,8 +29,10 @@ from typing import Any, Optional
 
 from . import supabase_database as db
 from .excel_probe import ProbeError
+import re
+
 from .publication_model import (
-    SCHEMA_VERSION, ProgramSource, build_state, canonical_json, content_checksum, parse_utc, publication_rows,
+    SCHEMA_VERSION, ProgramSource, _row, build_state, canonical_json, content_checksum, parse_utc, publication_rows,
     utc_text,
 )
 
@@ -140,12 +144,33 @@ def _same(existing: Optional[dict], inhalt: dict, pruefsumme: str) -> bool:
     return current is not None and canonical_json(current) == canonical_json(inhalt)
 
 
+def _programm_rang(programm: str) -> tuple:
+    zahl = re.search(r"\d+", programm or "")
+    return (int(zahl.group()) if zahl else 999, programm or "")
+
+
+def blockierte(state: dict) -> set[str]:
+    return {b["programm"] for b in state.get("blockiert", [])}
+
+
 def plan_changes(state: dict, existing: list[dict]) -> Plan:
     desired = {row_key(r): (r["inhalt"], r["pruefsumme"]) for r in publication_rows(state)}
     by_key = {row_key(r): r for r in existing}
+    gesperrt = blockierte(state)
+    # Blockierte Programme behalten ihren bisherigen Block im gemeinsamen Zeitplan.
+    alt = _inhalt(by_key[("zeitplan", "", "")]) if ("zeitplan", "", "") in by_key else None
+    behalten = [g for g in (alt or {}).get("gruppen", []) if isinstance(g, dict) and g.get("programm") in gesperrt] \
+        if not is_tombstone(alt) else []
+    if behalten:
+        gruppen = [g for g in state["zeitplan"]] + behalten
+        row = _row("zeitplan", "", "", "zeitplan", sorted(gruppen, key=lambda g: _programm_rang(g.get("programm"))))
+        desired[("zeitplan", "", "")] = (row["inhalt"], row["pruefsumme"])
     final = dict(desired)
     tombstones = []
     for key in sorted(by_key):
+        if key[1] in gesperrt and key not in desired:  # blockiertes Programm: bisherige Zeile bleibt unverändert
+            final[key] = (_inhalt(by_key[key]), by_key[key]["pruefsumme"])
+            continue
         if key not in desired:
             inhalt = tombstone_inhalt(key[0])
             final[key] = (inhalt, content_checksum(inhalt))
@@ -290,6 +315,7 @@ def verify_rows(returned: list[dict], expected: dict[Key, dict], state: dict) ->
         problems.append(f"{len(returned)} statt {len(expected)} Zeilen oder abweichende Schlüssel")
     limits = {p["programm"]: p["rotation_freigegeben"] for p in state["programme"]}
     active = {p["programm"] for p in state["programme"] if p["aktiv"]}
+    gesperrt = blockierte(state)  # behaltene Zeilen blockierter Programme: bei ihrer Publikation geprüft
     for key, exp in expected.items():
         row = by_key.get(key)
         if row is None:
@@ -309,6 +335,8 @@ def verify_rows(returned: list[dict], expected: dict[Key, dict], state: dict) ->
         if is_tombstone(inhalt):
             if set(inhalt) != TOMBSTONE_KEYS or inhalt.get("gruppen") != []:
                 problems.append(f"{label}: Tombstone enthält Daten")
+            continue
+        if key[1] in gesperrt:
             continue
         if key[1] and key[1] not in active:
             problems.append(f"{label}: Inhalt eines gesperrten Programms")
@@ -340,15 +368,17 @@ class Outcome:
     pruefsummen: list[tuple[str, str, str, str]] = field(default_factory=list)  # (bereich, programm, ak, summe)
     http: list[tuple[str, int]] = field(default_factory=list)
     state: Optional[dict] = None
+    blockiert: list[dict] = field(default_factory=list)  # fehlerhafte Programme (Name, Codes, Meldungen)
 
 
 def publish(config: db.DatabaseConfig, sources: list[ProgramSource], *, observed_at: datetime | str,
             transport=None) -> Outcome:
     stamp = utc_text(observed_at)
     # 1. Vollständige Validierung ohne Netzwerk.
-    offline = build_state(sources, observed_at=stamp)
+    offline = build_state(sources, observed_at=stamp, teilweise=True)
     slug, titel = offline["event"]["slug"], offline["event"]["titel"]
-    any_active = any(p["aktiv"] for p in offline["programme"])
+    # blockierte Programme zeigen ihren bisherigen Stand weiter: zählen nicht als Sperre
+    any_active = any(p["aktiv"] for p in offline["programme"]) or bool(offline["blockiert"])
     http: list[tuple[str, int]] = []
     writes = 0
 
@@ -359,10 +389,11 @@ def publish(config: db.DatabaseConfig, sources: list[ProgramSource], *, observed
     existing = fetch_rows(config, testtag["id"], transport, http, public=False) if testtag else []
     check_existing(existing)
     if testtag is None and not any_active:
-        return Outcome("nichts_zu_publizieren", slug, http=http, state=offline)
+        return Outcome("nichts_zu_publizieren", slug, http=http, state=offline, blockiert=offline["blockiert"])
 
     # 3./4./5. Live-Zeitpunkte zusammenführen, Endzustand und Änderungen bestimmen.
-    state = build_state(sources, observed_at=stamp, previous={"einzelwertungen": previous_live(existing)})
+    state = build_state(sources, observed_at=stamp, previous={"einzelwertungen": previous_live(existing)},
+                        teilweise=True)
     plan = plan_changes(state, existing)
     existing_by_key = {row_key(r): r for r in existing}
     meta: dict[str, Any] = {}
@@ -382,7 +413,7 @@ def publish(config: db.DatabaseConfig, sources: list[ProgramSource], *, observed
                        unveraendert=len(plan.unchanged) if status == "publiziert" else len(plan.final),
                        schreibanfragen=writes,
                        pruefsummen=[(k[0], k[1], k[2], s) for k, (_i, s) in sorted(plan.final.items())],
-                       http=http, state=state)
+                       http=http, state=state, blockiert=state["blockiert"])
 
     expected = {}
     for key, (inhalt, summe) in plan.final.items():

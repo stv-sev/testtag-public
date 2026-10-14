@@ -926,8 +926,11 @@ def _validate_event(sources: list[ProgramSource], issues: Issues) -> tuple[str, 
     return next(iter(slugs)), next(iter(titles))
 
 
-def _validate_subdivisions(programs: list[ProgramResult], issues: Issues) -> None:
-    """Subdivisionen eines Programms: jede AK steht in genau einer (sonst wäre die Rangliste der AK geteilt)."""
+def _validate_subdivisions(programs: list[ProgramResult], issues: Issues) -> set[str]:
+    """Subdivisionen eines Programms: jede AK steht in genau einer (sonst wäre die Rangliste der AK geteilt).
+
+    Gibt die Namen der betroffenen Subdivisionen zurück."""
+    betroffen: set[str] = set()
     by_definition: dict[str, list[ProgramResult]] = defaultdict(list)
     for p in programs:
         by_definition[p.definition.name].append(p)
@@ -939,18 +942,54 @@ def _validate_subdivisions(programs: list[ProgramResult], issues: Issues) -> Non
                     issues.add(Code.SUBDIVISION_UNGUELTIG, f"{definition}: {ak} kommt in den Subdivisionen {seen[ak]} "
                                                            f"und {p.name} vor; eine AK muss ganz in einer Subdivision "
                                                            f"stehen.")
+                    betroffen.update({seen[ak], p.name})
                 seen.setdefault(ak, p.name)
+    return betroffen
+
+
+def _bewerten(sources: list[ProgramSource], slug: str, issues: Issues,
+              teilweise: bool) -> tuple[list[ProgramResult], list[dict]]:
+    """Alle Programme prüfen. Streng: jeder Fehler bricht ab. Teilweise: ein fehlerhaftes Programm wird blockiert
+    (es behält seinen bisherigen öffentlichen Stand), die übrigen werden publiziert; sind alle fehlerhaft, Abbruch.
+    Steht in einer fehlerhaften Mappe Public!B6 gültig auf FALSCH, gilt das Programm als gesperrt (nicht blockiert):
+    seine Inhalte werden nicht weiter gezeigt."""
+    if not teilweise:
+        evaluated = [evaluate_program(src, slug, issues) for src in sources]
+        issues.raise_if_any()
+        _validate_subdivisions(evaluated, issues)
+        issues.raise_if_any()
+        return evaluated, []
+    gueltig, blockiert, alle = [], [], Issues()
+    for src in sources:
+        eigene = Issues()
+        program = evaluate_program(src, slug, eigene)
+        alle.items.extend(eigene.items)
+        if eigene or program is None:
+            if src.public.get("public_active") is not False:
+                blockiert.append((src, eigene.items))
+        else:
+            gueltig.append(program)
+    konflikte = Issues()
+    betroffen = _validate_subdivisions(gueltig, konflikte)
+    alle.items.extend(konflikte.items)
+    for program in [p for p in gueltig if p.name in betroffen]:
+        gueltig.remove(program)
+        blockiert.append((program.source, [i for i in konflikte.items if program.name in i.message]))
+    if not gueltig and alle:
+        alle.raise_if_any()
+    return gueltig, [{"programm": public_program_name(src), "codes": sorted({i.code for i in items}),
+                      "meldungen": [f"[{i.code}] {i.message}" for i in items]} for src, items in blockiert]
 
 
 def build_state(sources: list[ProgramSource], *, observed_at: datetime | str,
-                previous: Optional[dict] = None) -> dict:
-    """Validiert alle Programme und erzeugt den kanonischen Publikationsstand – oder bricht vollständig ab."""
+                previous: Optional[dict] = None, teilweise: bool = False) -> dict:
+    """Validiert alle Programme und erzeugt den kanonischen Publikationsstand – oder bricht vollständig ab.
+
+    `teilweise=True` (Datenbank-Publisher): fehlerhafte Programme stehen unter `blockiert` und fehlen im Stand;
+    Fehler auf Ebene Testtag (Slug, Titel, doppelte Programme) brechen weiterhin alles ab."""
     issues = Issues()
     slug, title = _validate_event(sources, issues)
-    evaluated = [evaluate_program(src, slug, issues) for src in sources]
-    issues.raise_if_any()
-    _validate_subdivisions(evaluated, issues)
-    issues.raise_if_any()
+    evaluated, blockiert = _bewerten(sources, slug, issues, teilweise)
     order = {name: i for i, name in enumerate(PROGRAM_ORDER)}
     programs = sorted(evaluated, key=lambda p: (order[p.definition.name],
                                                 min((x.ak_kontr for x in p.participants), default=999), p.name))
@@ -985,6 +1024,7 @@ def build_state(sources: list[ProgramSource], *, observed_at: datetime | str,
         "einzelwertungen": merge_live(previous_results, current, observed_at),
         "ranglisten": ranglisten,
         "diagnose": {p.name: p.diagnose for p in programs},
+        "blockiert": blockiert,
     }
 
 

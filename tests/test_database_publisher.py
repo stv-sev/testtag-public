@@ -1,6 +1,7 @@
 """P1C-Datenbank-Publisher gegen die simulierte Data API (kein echtes Netzwerk)."""
 from __future__ import annotations
 
+import copy
 import json
 import tempfile
 import unittest
@@ -100,12 +101,46 @@ class FirstPublicationTests(Base):
         self.assertTrue(all(s[2] == "secret" for s in writes))
         self.assert_keys_only_in_apikey(api)
 
-    def test_validation_error_aborts_before_network(self):
+    def test_validation_error_in_all_programs_aborts_before_network(self):
         api = FakeDataApi()
-        sources = self.sources(ak5={"direct": {(1, "Kraft", 1): 8}})  # Kraft vor Ort und extern
-        with self.assertRaises(pm.PublicationError):
+        sources = self.sources(ak5={"direct": {(1, "Kraft", 1): 8}},  # Kraft vor Ort und extern
+                               ak9={"scores": {**AK9_SCORES, (3, "Sprung", 2): (4, 1, 4)}})  # zwei Alternativen
+        with self.assertRaises(pm.PublicationError) as ctx:
             self.publish(api, sources)
+        self.assertEqual(set(ctx.exception.codes), {"ATHLETIK_BEIDE_QUELLEN", "SPRUNG_DOPPELTE_ALTERNATIVE"})
         self.assertEqual(api.calls, [])
+
+    def test_error_in_one_program_keeps_its_public_state_and_publishes_the_others(self):
+        api = FakeDataApi()
+        self.publish(api, self.sources(), T1)
+        tid = next(iter(api.testtage))
+        vorher = copy.deepcopy(self.published(api, tid))
+        neu = self.sources(ak5={"direct": {(1, "Kraft", 1): 8}},  # AK5 fehlerhaft: Kraft vor Ort und extern
+                           ak9={"scores": {**AK9_SCORES, (1, "Boden", 1): (5, 1, 5)}})  # AK9: neues Resultat
+        outcome = self.publish(api, neu, T2)
+        self.assertEqual(outcome.status, "publiziert")
+        self.assertEqual([(b["programm"], b["codes"]) for b in outcome.blockiert], [(AK5, ["ATHLETIK_BEIDE_QUELLEN"])])
+        self.assertTrue(any("Noteneingabe!" in m and "Kraft".lower() in m for m in outcome.blockiert[0]["meldungen"]))
+        self.assert_no_personal_data(outcome.blockiert)
+        nachher = copy.deepcopy(self.published(api, tid))
+        for key, row in vorher.items():
+            if key[1] == AK5:
+                self.assertEqual(nachher[key], row, key)  # alter Stand bleibt (kein Tombstone, nicht neu geschrieben)
+        live9 = [k for k in nachher if k[0] == "resultate_live" and k[1] == AK9]
+        self.assertTrue(any(nachher[k]["pruefsumme"] != vorher[k]["pruefsumme"] for k in live9))  # AK9 publiziert
+        zeitplan = nachher[("zeitplan", "", "")]["inhalt"]["gruppen"]
+        self.assertEqual([g["programm"] for g in zeitplan], [AK5, AK9])  # Block von AK5 bleibt im Zeitplan
+        self.assertEqual(zeitplan[0], vorher[("zeitplan", "", "")]["inhalt"]["gruppen"][0])
+        self.assertTrue(api.testtage[tid]["ist_oeffentlich"])
+        # korrigiert: wieder vollständig, nichts mehr blockiert
+        outcome = self.publish(api, self.sources(ak9={"scores": {**AK9_SCORES, (1, "Boden", 1): (5, 1, 5)}}), T3)
+        self.assertEqual(outcome.blockiert, [])
+        # Sperre geht vor: B6 = FALSCH in der fehlerhaften Mappe verbirgt das Programm
+        gesperrt = self.sources(ak5={"direct": {(1, "Kraft", 1): 8}, "public": {"public_active": False}})
+        outcome = self.publish(api, gesperrt, "2026-10-09T11:00:00Z")
+        self.assertEqual(outcome.blockiert, [])
+        live5 = [r for k, r in self.published(api, tid).items() if k[0] == "resultate_live" and k[1] == AK5]
+        self.assertTrue(live5 and all(r["inhalt"].get("aktiv") is False for r in live5))  # Tombstones
 
     def test_existing_testtag_is_reused_without_duplicate(self):
         api = FakeDataApi()

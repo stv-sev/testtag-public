@@ -499,3 +499,15 @@ class SubdivisionTests(Base):
             a = self.book(AK5, public={"subdivision": "Morgen"}, participants=[p for p in people if p[0] in (1, 3)])
             b = self.book(AK5, public={"subdivision": "Vormittag"}, participants=[p for p in people if p[0] in (2, 4)])
             self.error(Code.SUBDIVISION_UNGUELTIG, a, b, self.book(AK9))
+
+    def test_partial_state_blocks_only_faulty_programs(self):
+        people = testtag_spec(AK5)["participants"]
+        a = self.book(AK5, public={"subdivision": "Morgen"}, participants=[p for p in people if p[0] in (1, 3)])
+        b = self.book(AK5, public={"subdivision": "Vormittag"}, participants=[p for p in people if p[0] in (2, 4)])
+        sources = [ep.read_program_source(x, wait_seconds=0, sleep=lambda _s: None) for x in (a, b, self.book(AK9))]
+        state = pm.build_state(sources, observed_at=T1, teilweise=True)
+        self.assertEqual([p["programm"] for p in state["programme"]], [AK9])
+        self.assertEqual(sorted(x["programm"] for x in state["blockiert"]), ["Morgen", "Vormittag"])
+        self.assertTrue(all(x["codes"] == ["SUBDIVISION_UNGUELTIG"] and x["meldungen"] for x in state["blockiert"]))
+        with self.assertRaises(pm.PublicationError):  # streng (Standard): ganzer Abbruch wie bisher
+            pm.build_state(sources, observed_at=T1)

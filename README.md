@@ -411,7 +411,19 @@ Fehlerverhalten:
 
 - **Datei-, Netzwerk- und Datenbankfehler:** Der alte öffentliche Stand bleibt. Neue Versuche folgen nach 1×, 2×,
   4× … Takt, höchstens alle 60 s.
-- **Validierungsfehler:** Der alte Stand bleibt. Neuer Versuch erst nach der nächsten Dateiänderung.
+- **Validierungsfehler:** betreffen nur ihr Programm. Dieses behält seinen letzten öffentlichen Stand (auch seinen
+  Block im Zeitplan); die übrigen Programme werden trotzdem publiziert. Bei einem Lesefehler einer Mappe gilt ihr
+  zuletzt gültig gelesener Stand weiter. Neuer Versuch erst nach der nächsten Dateiänderung. Das Protokoll nennt
+  Programm, Code und die ersten Meldungen mit Zelle und Test, z. B.
+  `Teilweise publiziert – blockiert: AK5-AK9+ (ATHLETIK_INAKTIVE_QUELLE)` und
+  `[ATHLETIK_INAKTIVE_QUELLE] AK5-AK9+: Noteneingabe!NB12: kraft Test 1 ist in der nicht gewählten Quelle erfasst
+  (Modus vor_ort).` (ohne Namen). Fehler auf Ebene Testtag (Slug, Titel, doppelte Programme) oder Fehler in allen
+  Programmen blockieren weiterhin alles. Steht in einer fehlerhaften Mappe `Public!B6` auf FALSCH, wird das Programm
+  wie gewünscht verborgen.
+- **Athletik extern** (`Kraftmodus`/`Beweglichkeitsmodus` = `extern`): Werte nur in die Direktspalten der
+  Noteneingabe eintragen; im Modus `vor_ort` gehören sie auf die Stationsblätter. Ein Wert in der jeweils anderen
+  Quelle ergibt `ATHLETIK_INAKTIVE_QUELLE` (bzw. `ATHLETIK_BEIDE_QUELLEN`). Erscheinen in Live und Ranglisten, nicht
+  in „Gerät“ (keine Station).
 - **Archivierter Testtag:** keine Schreibanfrage mehr, nur noch ein Protokolleintrag.
 
 Wiederanlauf:

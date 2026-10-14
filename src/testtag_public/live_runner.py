@@ -21,7 +21,9 @@ Ablauf je Takt (`TESTTAG_POLL_SECONDS`, Standard 1 s, zulässig 1–60):
 7. Erst nach Erfolg gilt der kombinierte Stand als verarbeitet.
 
 Fehler: Datei- und Netzwerk-/Datenbankfehler werden mit wachsendem Abstand (höchstens 60 s) wiederholt;
-Validierungsfehler erst nach der nächsten Dateiänderung. Der alte öffentliche Stand bleibt jeweils erhalten.
+Validierungsfehler erst nach der nächsten Dateiänderung. Ein Validierungsfehler betrifft nur sein Programm: es behält
+seinen letzten öffentlichen Stand (bei einem Lesefehler gilt der zuletzt gültig gelesene Stand der Mappe), die übrigen
+Programme werden publiziert. Das Protokoll nennt Programm, Code und die ersten Meldungen (Zelle, Test – ohne Namen).
 Ein archivierter Testtag wird nie mehr beschrieben.
 
 Eine lokale Sperre (`out/live-<kennung>.lock`, nur PID und Startzeit) verhindert zwei Dauerpublisher für
@@ -69,6 +71,7 @@ STABIL_SEKUNDEN = 2  # Mindestdauer ohne Änderung von Grösse/Änderungszeit vo
 OFFEN_SEKUNDEN = 2  # Abstand der Prüfungen einer in Excel geöffneten Mappe
 LOCK_EXIT = 10
 SLUG_ABWEICHUNG = "SLUG_ABWEICHUNG"
+MAX_MELDUNGEN = 5  # je Ereignis protokollierte Validierungsmeldungen (Ort, ohne Namen)
 
 
 class InstanceLockError(ProbeError):
@@ -306,9 +309,20 @@ class Runner:
         lesen = [p for i, p in enumerate(self.programme) if self.gelesen.get(p, (None,))[0] != combined[i]]
         self.log(f"Datei stabil: {', '.join(changed)} – gelesen wird {', '.join(lesen)}"
                  + ("" if len(lesen) == len(self.programme) else "; unveränderte Arbeitsmappe nicht erneut gelesen"))
+        lesefehler: dict[str, PublicationError] = {}
         try:
-            sources = [self.read(self.paths[p], wait_seconds=0, sleep=lambda _s: None) if p in lesen
-                       else self.gelesen[p][1] for p in self.programme]
+            sources = []
+            for p in self.programme:
+                if p not in lesen:
+                    sources.append(self.gelesen[p][1])
+                    continue
+                try:
+                    sources.append(self.read(self.paths[p], wait_seconds=0, sleep=lambda _s: None))
+                except PublicationError as exc:
+                    if p not in self.gelesen:  # noch kein gültiger Stand dieser Mappe: nichts publizieren
+                        raise
+                    lesefehler[p] = exc  # Programm blockiert: zuletzt gültig gelesener (= öffentlicher) Stand bleibt
+                    sources.append(self.gelesen[p][1])
             self._programme_pruefen(sources)
             if {s.public.get("event_id") for s in sources} != {self.slug}:
                 raise PublicationError([Issue(SLUG_ABWEICHUNG, "Public!B2 entspricht nicht dem bestätigten Slug.")])
@@ -318,12 +332,32 @@ class Runner:
             return self._invalid(exc, combined)
         self.gelesen = {p: (combined[i], sources[i]) for i, p in enumerate(self.programme)}
         self.offen_basis.clear()  # geöffneten Stand danach einmal abgleichen (Kopie, ohne Anfrage wenn gleich)
-        return self._veroeffentlichen(sources, combined)
+        return self._veroeffentlichen(sources, combined, lesefehler=lesefehler)
 
-    def _veroeffentlichen(self, sources: list, combined: tuple, wann: str = "nach der nächsten Dateiänderung") -> str:
+    def _meldungen(self, meldungen: list[str]) -> None:
+        for text in meldungen[:MAX_MELDUNGEN]:
+            self.log(f"  {self._clean(text)}")
+        if len(meldungen) > MAX_MELDUNGEN:
+            self.log(f"  … und {len(meldungen) - MAX_MELDUNGEN} weitere Meldungen")
+
+    def _blockiert_melden(self, blockiert: list, lesefehler: Optional[dict], wann: str) -> bool:
+        teile = [f"{b['programm']} ({', '.join(b['codes'])})" for b in blockiert]
+        teile += [f"{p} ({', '.join(e.codes)}, beim Lesen)" for p, e in (lesefehler or {}).items()]
+        if not teile:
+            return False
+        self.log(f"Teilweise publiziert – blockiert: {'; '.join(teile)} – dort bleibt der alte Stand, neuer Versuch "
+                 f"{wann}")
+        self._meldungen([m for b in blockiert for m in b["meldungen"]]
+                        + [f"[{i.code}] {i.message}" for e in (lesefehler or {}).values() for i in e.issues])
+        return True
+
+    def _veroeffentlichen(self, sources: list, combined: tuple, wann: str = "nach der nächsten Dateiänderung",
+                          lesefehler: Optional[dict] = None) -> str:
         shas = tuple(s.source.sha256 for s in sources)
         if self.verarbeitet is not None and shas == self.verarbeitet.shas:
             self._done(combined, shas)
+            if self._blockiert_melden([], lesefehler, wann):
+                return "teilweise_blockiert"
             self.log("Inhalt unverändert (nur Speicherzeitpunkt) – keine Supabase-Anfrage")
             return "inhalt_unveraendert"
         if self.archiviert:
@@ -357,6 +391,8 @@ class Runner:
             self.log(f"Abgleich bestätigt: {outcome.zeilen_gesamt} Zeilen unverändert – keine Schreibanfrage")
         else:
             self.log("Kein Programm freigegeben und kein Testtag vorhanden – nichts publiziert")
+        if self._blockiert_melden(outcome.blockiert, lesefehler, wann):
+            return "teilweise_blockiert"
         return outcome.status
 
     # Geöffnete Excel-Mappe (zusätzlicher Auslöser bei unveränderter Datei)
@@ -394,8 +430,15 @@ class Runner:
                     self.offen_kandidat.pop(program, None)  # Stand ändert sich noch: nächste Prüfungen abwarten
                     return "offen_in_bearbeitung"
                 kopien[program] = ziel
+            neu, lesefehler = {}, {}
             try:
-                neu = {p: self.read(path, wait_seconds=0, sleep=lambda _s: None) for p, path in kopien.items()}
+                for p, path in kopien.items():
+                    try:
+                        neu[p] = self.read(path, wait_seconds=0, sleep=lambda _s: None)
+                    except PublicationError as exc:
+                        if p not in self.gelesen:
+                            raise
+                        lesefehler[p] = exc  # dieses Programm blockiert, die übrigen weiter
             except SourceError as exc:
                 self.log(f"Excel-Stand nicht lesbar ({self._clean(str(exc))}) – alter Stand bleibt")
                 return "offen_in_bearbeitung"
@@ -408,6 +451,8 @@ class Runner:
             self.offen_basis.update(stabil)
             for p in stabil:
                 self.offen_kandidat.pop(p, None)
+            if self._blockiert_melden([], lesefehler, "nach der nächsten Änderung"):
+                return "teilweise_blockiert"
             return "keine_aenderung"
         self.log(f"Excel-Stand geändert: {', '.join(geaendert)} – geöffnete Arbeitsmappe ohne neuen Speicherstand "
                  "wird über eine Kopie gelesen")
@@ -419,7 +464,7 @@ class Runner:
         except PublicationError as exc:
             self.offen_basis.update(stabil)
             return self._invalid(exc, combined, "nach der nächsten Änderung")
-        status = self._veroeffentlichen(sources, combined, "nach der nächsten Änderung")
+        status = self._veroeffentlichen(sources, combined, "nach der nächsten Änderung", lesefehler=lesefehler)
         if status != "wiederholung_geplant":  # Netzwerkfehler: gleicher Stand wird erneut versucht
             self.offen_basis.update(stabil)
             for p in stabil:
@@ -432,6 +477,7 @@ class Runner:
     def _invalid(self, exc: PublicationError, combined: tuple, wann: str = "nach der nächsten Dateiänderung") -> str:
         self.blocked = combined
         self.log(f"Validierung fehlgeschlagen ({', '.join(exc.codes)}) – alter Stand bleibt, neuer Versuch {wann}")
+        self._meldungen([f"[{i.code}] {i.message}" for i in exc.issues])
         return "validierung_fehler"
 
     def run(self, *, stop: Optional[threading.Event] = None, sleep: Callable[[float], None] = time.sleep,

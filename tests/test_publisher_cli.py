@@ -125,13 +125,20 @@ class PublisherCliTests(unittest.TestCase):
         self.assertIn("SUPABASE_SECRET_KEY", err)
         self.assertIn("SUPABASE_PUBLISHABLE_KEY", err)
 
-    def test_validation_error_stops_before_network(self):
+    def test_error_in_one_program_blocks_only_that_program(self):
         bad = make_testtag_workbook(self.dir / "bad.xlsx", AK5, scores=SCORES, direct={(1, "Kraft", 1): 8})
+        code, out, err = self.run_cli(ak5=bad)  # Probelauf: Signal mit Exit 4, Ort der Meldung
+        self.assertEqual(code, 4)
+        self.assertIn("Blockiert:           AK5-AK9+ (ATHLETIK_BEIDE_QUELLEN) – alter öffentlicher Stand bleibt", err)
+        self.assertIn("Noteneingabe!", err)
+        self.assertIn("Programm:            AK9-AK12", out)
+        self.assertIn("ein Programm ist blockiert", out)
         api = FakeDataApi()
         code, out, err = self.run_cli("--publish", "--confirm-slug", TT_SLUG, env=TEST_ENV, transport=api, ak5=bad)
-        self.assertEqual(code, 4)
+        self.assertEqual(code, 0, err)
+        self.assertIn("(teilweise – blockiert: AK5-AK9+)", out)
         self.assertIn("ATHLETIK_BEIDE_QUELLEN", err)
-        self.assertEqual(api.calls, [])
+        self.assertTrue(any(c["table"] == "veroeffentlichung" and c["method"] == "POST" for c in api.calls))
         self.assert_safe(out + err)
 
     def test_wrong_program_in_option_is_rejected(self):

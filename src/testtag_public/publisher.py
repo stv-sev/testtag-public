@@ -132,6 +132,19 @@ def _summary(report: SafeReport, state: dict, rows: list[dict]) -> None:
         report.out(f"  {row['bereich']:<20} {row['programm'] or '-':<9} {row['ak'] or '-':<6} {short(row['pruefsumme'])}")
 
 
+MAX_BLOCKIERT_MELDUNGEN = 10
+
+
+def _blockiert(report: SafeReport, blockiert: list[dict]) -> None:
+    """Fehlerhafte Programme: Name, Codes und die ersten Meldungen (Zelle, Test – ohne Namen)."""
+    for b in blockiert:
+        report.err(f"Blockiert:           {b['programm']} ({', '.join(b['codes'])}) – alter öffentlicher Stand bleibt")
+        for text in b["meldungen"][:MAX_BLOCKIERT_MELDUNGEN]:
+            report.err(f"  {text}")
+        if len(b["meldungen"]) > MAX_BLOCKIERT_MELDUNGEN:
+            report.err(f"  … und {len(b['meldungen']) - MAX_BLOCKIERT_MELDUNGEN} weitere Meldungen")
+
+
 def _check_program(source, expected: str, option: str) -> None:
     if source.public.get("program") != expected:
         raise PublicationError([Issue(PROGRAMM_ZUORDNUNG, f"{option} muss das Programm {expected} enthalten "
@@ -201,12 +214,16 @@ def run(
                 _check_program(source, program, option)
             sources.append(source)
         observed = now()
-        state = build_state(sources, observed_at=observed)
+        state = build_state(sources, observed_at=observed, teilweise=True)
         report.protect_state(state)
         rows = publication_rows(state)
 
         if not writing:
             _summary(report, state, rows)
+            if state["blockiert"]:  # wie beim Publizieren: fehlerhafte Programme behalten ihren alten Stand
+                _blockiert(report, state["blockiert"])
+                report.out("Status:              Probelauf – nichts geschrieben; ein Programm ist blockiert")
+                return PublicationError.exit_code
             report.out("Status:              Probelauf – nichts geschrieben")
             return 0
 
@@ -233,7 +250,10 @@ def run(
                    f"{' (neu angelegt)' if outcome.testtag_neu else ''}")
         labels = {"publiziert": "publiziert und öffentlich geprüft", "unveraendert": "unverändert – nichts geschrieben",
                   "nichts_zu_publizieren": "kein Programm freigegeben – nichts geschrieben"}
-        report.out(f"Status:              {labels[outcome.status]}")
+        _blockiert(report, outcome.blockiert)
+        teil = f" (teilweise – blockiert: {', '.join(b['programm'] for b in outcome.blockiert)})" \
+            if outcome.blockiert else ""
+        report.out(f"Status:              {labels[outcome.status]}{teil}")
         return 0
     except PublicationError as exc:
         report.err(f"Validierung:         FEHLER ({', '.join(exc.codes)}) – nichts geschrieben")

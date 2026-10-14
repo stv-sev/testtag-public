@@ -218,21 +218,38 @@ class ChangeDetectionTests(Base):
 
 
 class FailureTests(Base):
-    def test_validation_error_keeps_old_state_and_waits_for_next_change(self):
+    def test_validation_error_blocks_only_its_program_and_names_the_cell(self):
         runner = self.started()
         tid = next(iter(self.api.testtage))
-        rows = json.dumps(sorted(map(list, self.api.rows.items())), sort_keys=True)
+        ak5_zeilen = lambda: {k: r for k, r in self.api.rows.items() if k[2] == AK5}  # noqa: E731
+        vorher = json.dumps(sorted(map(list, ak5_zeilen().items())), sort_keys=True)
         self.write(AK5, direct={(1, "Kraft", 1): 8})  # Kraft vor Ort und extern
-        self.assertEqual(self.ticks(runner, 2), ["in_bearbeitung", "validierung_fehler"])
+        self.assertEqual(self.ticks(runner, 2), ["in_bearbeitung", "teilweise_blockiert"])
+        self.assertTrue(any("Teilweise publiziert – blockiert: AK5-AK9+ (ATHLETIK_BEIDE_QUELLEN)" in line
+                            for line in self.logs))
+        self.assertTrue(any("Noteneingabe!" in line and "kraft Test 1" in line for line in self.logs))  # Ort, ohne Namen
         reads = len(self.reads)
-        self.assertEqual(set(self.ticks(runner, 4)), {"wartet_auf_aenderung"})
+        self.assertEqual(set(self.ticks(runner, 4)), {"keine_aenderung"})  # derselbe Stand nicht erneut
         self.assertEqual(len(self.reads), reads)
-        self.assertEqual(json.dumps(sorted(map(list, self.api.rows.items())), sort_keys=True), rows)
-        self.assertTrue(any("Validierung fehlgeschlagen (ATHLETIK_BEIDE_QUELLEN)" in line for line in self.logs))
+        calls = len(self.api.calls)
+        self.write(AK9, scores={**AK9_SCORES, (2, "Boden", 1): (5, 1, 5)})  # AK9 ändert: wird trotzdem publiziert
+        self.assertEqual(self.ticks(runner, 2), ["in_bearbeitung", "teilweise_blockiert"])
+        self.assertEqual(len(self.batches(calls)), 1)
+        self.assertEqual(json.dumps(sorted(map(list, ak5_zeilen().items())), sort_keys=True), vorher)  # AK5 alt
         self.write(AK5, direct={})
         self.assertEqual(runner.tick(), "in_bearbeitung")
-        self.assertIn(runner.tick(), ("unveraendert", "inhalt_unveraendert"))
+        self.assertIn(runner.tick(), ("publiziert", "unveraendert", "inhalt_unveraendert"))
         self.assertEqual(self.api.testtage[tid]["status"], "live")
+
+    def test_read_error_of_one_workbook_keeps_its_last_valid_state(self):
+        runner = self.started()
+        calls = len(self.api.calls)
+        self.write(AK5, scores={**AK5_SCORES, (2, "Pferd", 1): (5, 1, "=AB15*AC15")})  # Formel ohne Resultat
+        self.write(AK9, scores={**AK9_SCORES, (2, "Boden", 1): (5, 1, 5)})
+        self.assertEqual(self.ticks(runner, 2), ["in_bearbeitung", "teilweise_blockiert"])
+        self.assertTrue(any("blockiert: AK5-AK9+ (FORMELRESULTAT_FEHLT, beim Lesen)" in line for line in self.logs))
+        self.assertTrue(any("FORMELRESULTAT_FEHLT" in line and "Noteneingabe!" in line for line in self.logs))
+        self.assertEqual(len(self.batches(calls)), 1)  # AK9 publiziert
 
     def test_locked_file_is_retried_and_later_succeeds(self):
         attempts = {"n": 0}
@@ -331,7 +348,7 @@ class FailureTests(Base):
         for marker in (*TT_SECRET_MARKERS, *keys, *(k[:16] for k in keys), *ids, TEST_SECRET_KEY,
                        TEST_PUBLISHABLE_KEY, str(self.dir), "ak5.xlsx", "ak9.xlsx", "7.5", tid, "Traceback"):
             self.assertNotIn(marker, text)
-        for expected in ("Publikation bestätigt", "Validierung fehlgeschlagen", "Wiederholung geplant",
+        for expected in ("Publikation bestätigt", "Teilweise publiziert – blockiert", "Wiederholung geplant",
                          "Datei stabil", "Änderung erkannt"):
             self.assertIn(expected, text)
 
@@ -522,7 +539,7 @@ class OpenExcelStateTests(Base):
                                 (dict(direct={(1, "Kraft", 1): 8}), "ATHLETIK_BEIDE_QUELLEN")):
             with self.subTest(code=code):
                 self.online(**aenderung)
-                self.assertEqual(self.pruefen(2), ["offen_in_bearbeitung", "validierung_fehler"])
+                self.assertEqual(self.pruefen(2), ["offen_in_bearbeitung", "teilweise_blockiert"])
                 self.assertTrue(any(code in line and "neuer Versuch nach der nächsten Änderung" in line
                                     for line in self.logs))
                 kopien = self.offen.kopien

@@ -113,6 +113,21 @@ Pages-Build die Secrets.
 
 ---
 
+## Nachtrag 14.10.2026 nachmittags: Fehler blockiert nur sein Programm
+
+- **Anlass:** Externe Kraftwerte AK9–AK12 erschienen nicht. Ursache: Der Dauer-Publisher wies ab 14:51 jede Änderung
+  mit `ATHLETIK_INAKTIVE_QUELLE` ab (ein Athletikwert in der Direktspalte der AK5–AK9+-Mappe, die vor Ort erfasst)
+  und blockierte damit auch AK9–AK12; das Protokoll nannte nur den Code.
+- **Neu:** Ein Validierungsfehler blockiert nur sein Programm (alter öffentlicher Stand inkl. Zeitplanblock bleibt),
+  die übrigen werden publiziert; im Dauerbetrieb gilt bei einem Lesefehler der zuletzt gültige Stand der Mappe.
+  Probelauf und Protokoll nennen Programm, Code, Zelle und Test (ohne Namen). Ereignisfehler oder Fehler in allen
+  Programmen blockieren weiter alles; B6 = FALSCH verbirgt auch eine fehlerhafte Mappe.
+- **Probelauf** (synthetische Kopien, Slug `systemtest-probelauf-202610141531`, danach verborgen): AK5 mit Kraftwert
+  in der Direktspalte → blockiert, 11 AK5-Zeilen öffentlich unverändert, Meldungen mit Zellen (`Noteneingabe!NB12` …);
+  AK9 mit externen Werten → publiziert (50 Beweglichkeit, 70 Kraft), sichtbar in Live und Rangliste Athletik;
+  nach Korrektur unverändert. Originalmappen, produktiver Testtag, `.env`, `main`, Pages unverändert.
+- **Tests:** pytest 340 (dreimal grün).
+
 ## Nachtrag 14.10.2026 spät: Beweglichkeit in „Gerät“, Subdivisionen
 
 - **Beweglichkeit** ist ein Gerät in „Gerät“ (alle Stationen der Startliste): Riege der Rotation mit Total
