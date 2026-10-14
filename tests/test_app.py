@@ -149,7 +149,7 @@ class AppTests(unittest.TestCase):
         self.assert_clean(at)
 
     def test_uniform_header_logo_status_and_footer_in_every_view(self):
-        for kennung, badge in ((None, None), (TT_SLUG, "Live – wird etwa alle 5 Sekunden aktualisiert"),
+        for kennung, badge in ((None, None), (TT_SLUG, "Live – wird laufend aktualisiert"),
                                (ARCHIV_SLUG, "Archiv – abgeschlossener Testtag, keine Aktualisierung"),
                                ("synth-testtag-2027", "Vorbereitet – noch nicht gestartet")):
             with self.subTest(kennung=kennung):

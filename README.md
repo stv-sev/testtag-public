@@ -596,6 +596,13 @@ Mappen angeben: `--workbook <Mappe>` mehrfach bzw. in `.env`
 `TESTTAG_WORKBOOKS="<Pfad>\AK5-AK7.xlsx;<Pfad>\AK8-AK9plus.xlsx;<Pfad>\AK9-AK12.xlsx"` (statt der beiden
 Einzelpfade; beides zugleich wird abgewiesen). Gilt für Publisher, `--check` und Dauerbetrieb (`live_runner`).
 
+## Live: Gerätefilter
+
+Neben Programm und AK lässt sich Live auf ein Gerät einschränken (Standard „Alle“). Angeboten werden die Geräte mit
+veröffentlichten Resultaten der Auswahl, in der Stationsfolge der Startliste; Kraft (ohne Station) am Schluss. Die
+Wahl steht in der Adresse (`&g=`) und gilt auch in „Gerät“. Die Statuszeile lautet „Live – wird laufend
+aktualisiert“.
+
 ## Ansicht „Gerät“
 
 Eigene Pille auf der statischen Seite (Reihenfolge: Live · Gerät · Ranglisten · Startliste · Zeitplan). Wählbar sind

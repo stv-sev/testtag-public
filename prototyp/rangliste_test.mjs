@@ -282,6 +282,28 @@ const gezeichnet = {};
   const pillen = (await page.locator("#nav .tt-pille").allTextContents()).map((t) => t.trim());
   pruefe(JSON.stringify(pillen) === JSON.stringify(["⚡ Live", "🤸 Gerät", "🏅 Ranglisten", "📋 Startliste", "🕐 Zeitplan"]),
     `Pillen in der Reihenfolge Live · Gerät · Ranglisten · Startliste · Zeitplan (${pillen.join(" · ")})`);
+  // Live: Gerätefilter (Geräte mit Resultaten, Reihenfolge der Stationsfolge), Adresse &g=, bleibt beim Wechsel
+  await page.goto(adresse("&p=AK5-AK9%2B"));
+  await page.waitForSelector(".tt-liste .tt-karte");
+  const liveGeraete = await page.locator("#geraet option").allTextContents();
+  pruefe(liveGeraete[0] === "Alle" && liveGeraete.length > 2 && await page.locator("#rotation").isHidden(),
+    `Live: Gerätefilter ${liveGeraete.join(" · ")} (ohne Rotation)`);
+  const stationen = ["Boden", "Pferd", "Ringe", "Beweglichkeit", "Sprung", "Barren", "Trampolin", "Reck"];
+  const ohneKraft = liveGeraete.slice(1).filter((g) => g !== "Kraft");
+  pruefe(ohneKraft.every((g, i) => i === 0 || stationen.indexOf(g) > stationen.indexOf(ohneKraft[i - 1]))
+    && (!liveGeraete.includes("Kraft") || liveGeraete.at(-1) === "Kraft"), "Live: Reihenfolge wie Stationsfolge, Kraft am Schluss");
+  await page.selectOption("#geraet", "Boden");
+  await page.waitForFunction(() => [...document.querySelectorAll("#inhalt .tt-karte .tt-geraet")].every((x) => x.textContent === "Boden"));
+  const nBoden = await page.locator("#inhalt .tt-karte").count();
+  pruefe(nBoden > 0 && params().get("g") === "Boden", `Live gefiltert auf Boden: ${nBoden} Karten, Adresse g=Boden`);
+  await page.click("[data-ansicht=geraet]");
+  await page.waitForFunction(() => document.getElementById("geraet").value === "Boden");
+  await page.click("[data-ansicht=live]");
+  await page.waitForFunction(() => document.getElementById("geraet").value === "Boden" && document.querySelector("#inhalt .tt-karte"));
+  pruefe(params().get("g") === "Boden", "Gerät bleibt beim Wechsel Live ⇄ Gerät erhalten");
+  await page.selectOption("#geraet", "Alle");
+  await page.waitForFunction(() => new Set([...document.querySelectorAll("#inhalt .tt-karte .tt-geraet")].map((x) => x.textContent)).size > 1);
+  pruefe(!params().has("g"), "Alle: Filter aufgehoben, g nicht mehr in der Adresse");
   // Gerät: Rotation 5 per Adresse bei Freigabe 2 → verworfen, nichts angezeigt
   await page.goto(adresse("&ansicht=geraet&p=AK5-AK9%2B&g=Boden&r=5"));
   await bereit(page);
@@ -407,7 +429,8 @@ const gezeichnet = {};
   pruefe(params().get("r") === "1" && params().get("ansicht") === "geraet", "gewählte Rotation bleibt beim Wechsel erhalten");
   await page.click("[data-ansicht=live]");
   await page.waitForSelector(".tt-liste .tt-karte");
-  pruefe(["art", "sicht", "g", "r"].every((k) => !params().has(k)) && await page.locator("#filter2").isHidden(), "Live: ohne Rotationsauswahl");
+  pruefe(["art", "sicht", "r"].every((k) => !params().has(k)) && await page.locator("#rotation").isHidden()
+    && params().get("g") === await page.inputValue("#geraet"), "Live: ohne Rotationsauswahl, gewähltes Gerät als Filter");
   await ctx.close();
 }
 
@@ -422,8 +445,8 @@ const gezeichnet = {};
   await page.click("[data-ansicht=startliste]");
   await page.waitForSelector(".tt-startliste");
   let neu = sb.anfragen.slice(vor);
-  pruefe(neu.length === 1 && neu[0].teil === "zeilen" && neu[0].bereich === "eq.startliste",
-    `Live → Startliste: eine Anfrage (${JSON.stringify(neu.map((a) => `${a.teil}:${a.bereich}`))})`);
+  pruefe(neu.length <= 1 && neu.every((a) => a.teil === "zeilen" && a.bereich === "eq.startliste"),
+    `Live → Startliste: höchstens eine Anfrage (Live lädt die Startliste für den Gerätefilter mit) (${JSON.stringify(neu.map((a) => `${a.teil}:${a.bereich}`))})`);
   pruefe(await page.evaluate(() => window.__ohneNeuladen === true) && page.url().includes("ansicht=startliste")
     && page.url().includes("p=AK9-AK12"), `Startliste ohne Neuladen, Adresse ${new URL(page.url()).search}`);
   pruefe(await page.inputValue("#programm") === "AK9-AK12" && await page.locator("#ak").isHidden()

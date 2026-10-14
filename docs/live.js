@@ -21,7 +21,8 @@
  *      Inhalt wie publication_model.content_checksum); erst wenn alles stimmt, wird der Stand ersetzt.
  * Bei einem Fehler bleibt der letzte gültige Stand sichtbar, gekennzeichnet; neue Versuche mit wachsendem Abstand.
  *
- * Adresse: `?t=<slug>` Live, `&ansicht=geraet|rangliste|startliste|zeitplan`, `&p=<programm>&ak=<ak>` Auswahl (für alle
+ * Adresse: `?t=<slug>` Live (`&g=<Gerät>` Gerätefilter), `&ansicht=geraet|rangliste|startliste|zeitplan`,
+ * `&p=<programm>&ak=<ak>` Auswahl (für alle
  * Ansichten; Startliste nur Programm, Zeitplan ohne Auswahl),
  * `&art=technik|athletik` Ebene der Rangliste (ohne: Gesamt). Ranglisten haben kein „Alle“: ohne passende Auswahl
  * gilt das erste Programm bzw. die erste AK; eine Live-Auswahl „Alle“ bleibt dabei erhalten.
@@ -276,8 +277,8 @@
       return [schluessel(RANGLISTE, programm, ak), schluessel(LIVE, programm, ak)].filter((s) => kp.has(s));
     }
     const { programm, ak } = liveAuswahl(kp);
-    return [...kp.entries()].filter(([, k]) => k.bereich === LIVE && (programm === ALLE || k.programm === programm)
-      && (ak === ALLE || k.ak === ak)).map(([s]) => s);
+    return [...kp.entries()].filter(([, k]) => (programm === ALLE || k.programm === programm)
+      && ((k.bereich === LIVE && (ak === ALLE || k.ak === ak)) || k.bereich === STARTLISTE)).map(([s]) => s);
   }
 
   function pruefeInhalt(bereich, inhalt) {
@@ -395,7 +396,7 @@
       const u = new URL(location.href);
       const werte = [["ansicht", ansicht === "live" ? null : ansicht], ["p", auswahl.programm === ALLE ? null : auswahl.programm],
         ["ak", auswahl.ak === ALLE ? null : auswahl.ak], ["art", ansicht === "rangliste" && art !== "gesamt" ? art : null],
-        ["sicht", null], ["g", ansicht === "geraet" && auswahl.geraet ? auswahl.geraet : null],
+        ["sicht", null], ["g", (ansicht === "geraet" || ansicht === "live") && auswahl.geraet ? auswahl.geraet : null],
         ["r", ansicht === "geraet" && auswahl.rotation ? String(auswahl.rotation) : null]];
       for (const [k, v] of werte) { if (v === null) u.searchParams.delete(k); else u.searchParams.set(k, v); }
       if (u.href !== location.href) history[neuerEintrag ? "pushState" : "replaceState"](null, "", u);
@@ -472,7 +473,7 @@
   }
 
   function badge(status) {
-    const [klasse, text] = status === "live" ? ["live", "Live – wird etwa alle 5 Sekunden aktualisiert"]
+    const [klasse, text] = status === "live" ? ["live", "Live – wird laufend aktualisiert"]
       : status === "archiviert" ? ["archiv", "Archiv – abgeschlossener Testtag, keine Aktualisierung"]
         : ["demnaechst", "Vorbereitet – noch nicht gestartet"];
     return `<span class="tt-badge ${klasse}">${klasse === "live" ? "<span class='tt-punkt'></span>" : ""}${h(text)}</span>`;
@@ -494,6 +495,9 @@
       a.href = eigenerLink(a.dataset.ansicht);
     }
   }
+
+  // Gerät eines Resultats, wie auf der Karte angezeigt (Technik: Gerät; Athletik: Beweglichkeit bzw. Kraft).
+  const geraetName = (r) => (r.bereich === "technik" ? String(r.geraet ?? "") : ATHLETIK_TEXT[r.bereich] || String(r.bereich));
 
   function karte(nr, r) {
     let geraet, wert, chips;
@@ -540,6 +544,7 @@
     navigation();
     if (ansicht !== "rangliste") el.arten.hidden = true;
     el.filter2.hidden = true;
+    el.rotation.closest("label").hidden = ansicht === "live";  // Live: nur der Gerätefilter
     el.ak.closest("label").hidden = ansicht === "startliste";
     if (ansicht === "geraet") zeichneGeraet();
     else if (ansicht === "rangliste") zeichneRangliste();
@@ -574,7 +579,15 @@
       setzeInhalt("<div class='tt-leer'>Wird geladen …</div>", { n: -1 });
       return;
     }
-    const resultate = sortiere(schl.flatMap((s) => zeilen.get(s).resultate));
+    const alle = sortiere(schl.flatMap((s) => zeilen.get(s).resultate || []));
+    // Gerätefilter: Geräte mit veröffentlichten Resultaten, Reihenfolge der Stationsfolge (Startliste), übrige danach
+    const folge = [...new Set(schl.flatMap((s) => ((zeilen.get(s).einteilung || {}).geraete || [])))];
+    const rang = (g) => (folge.includes(g) ? folge.indexOf(g) : folge.length);
+    const geraete = [...new Set(alle.map(geraetName))].sort((a, b) => rang(a) - rang(b) || (a < b ? -1 : a > b ? 1 : 0));
+    const geraet = geraete.includes(auswahl.geraet) ? auswahl.geraet : ALLE;  // Auswahl selbst bleibt erhalten
+    el.filter2.hidden = !geraete.length;
+    if (geraete.length) optionen(el.geraet, geraete, geraet, (g) => g, true);
+    const resultate = geraet === ALLE ? alle : alle.filter((r) => geraetName(r) === geraet);
     if (!resultate.length) {
       setzeInhalt("<div class='tt-leer'>Für diese Auswahl sind noch keine Resultate veröffentlicht.</div>", { n: 0 });
       return;
@@ -935,7 +948,9 @@
     auswahl.programm = el.programm.value; auswahl.ak = ALLE; adresse(false); auswahlGeaendert();
   });
   el.ak.addEventListener("change", () => { auswahl.ak = el.ak.value; adresse(false); auswahlGeaendert(); });
-  el.geraet.addEventListener("change", () => { auswahl.geraet = el.geraet.value; adresse(false); zeichne(); });
+  el.geraet.addEventListener("change", () => {
+    auswahl.geraet = el.geraet.value === ALLE ? null : el.geraet.value; adresse(false); zeichne();
+  });
   el.rotation.addEventListener("change", () => {
     auswahl.rotation = /^[1-9]\d?$/.test(el.rotation.value) ? Number(el.rotation.value) : null;
     adresse(false); zeichne();

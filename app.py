@@ -501,7 +501,7 @@ def aktualisieren(zugang, testtag) -> bool:
 
 def status_text(status: str) -> tuple[str, str]:
     if status == "live":
-        return "Live", "wird etwa alle 5 Sekunden aktualisiert"
+        return "Live", "wird laufend aktualisiert"
     if status == "archiviert":
         return "Archiv", "abgeschlossener Testtag, keine Aktualisierung"
     return "Vorbereitet", "noch nicht gestartet"
