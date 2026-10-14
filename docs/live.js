@@ -34,6 +34,10 @@
  * Uhrzeit berechnet. Wählbar sind nur Rotationen 1 … `freigegeben` derselben geprüften Zeile (auch per Adresse); eine
  * nicht mehr zulässige Auswahl wird verworfen. Es gibt keine „aktuelle Rotation“: ohne Wahl wird keine Riege gezeigt.
  * Frühere Adressen `&ansicht=rangliste&art=technik&sicht=rotation` öffnen „Gerät“.
+ *
+ * Beamer (`&beamer=1`, immer Live; `&p=`, `&ak=`, `&g=` filtern wie sonst): dunkel, gross, ohne Bedienung, nur die
+ * neuesten Noten – so viele, wie auf den Bildschirm passen, ohne Scrollen. Noten, die während der Anzeige neu
+ * erscheinen (oder korrigiert werden), sind eine Minute lang hervorgehoben. Der Bildschirm wird wach gehalten.
  */
 "use strict";
 (() => {
@@ -45,6 +49,8 @@
   const VERALTET_NACH = 12000;
   const TAKT_UEBERSICHT = 60000;
   const MAX_LIVE = 300;
+  const BEAMER_MAX = 40;       // höchstens so viele Zeilen zeichnen; sichtbar bleiben die, die passen
+  const NEU_MS = 60000;        // Beamer: so lange gilt eine Note als neu
   const LIVE = "resultate_live";
   const RANGLISTE = "resultate_rangliste";
   const STARTLISTE = "startliste";
@@ -185,6 +191,9 @@
   let ansicht = "live";        // live | geraet | rangliste | startliste | zeitplan
   let taktMs = TAKT_LIVE;      // aktueller Abstand der Änderungsabfrage
   let art = "gesamt";          // Ebene der Rangliste
+  const beamer = new URLSearchParams(location.search).get("beamer") === "1";
+  const gesehen = new Map();   // Beamer: Ergebnis-ID|geaendert_am → erstmals gezeigt (ms; 0 = schon beim Start da)
+  let wachSperre = null;       // Beamer: Wake Lock des Bildschirms
 
   function vergessen() {
     testtag = null; koepfe = new Map(); zeilen = new Map(); nachholen = true; angezeigt = "";
@@ -602,11 +611,64 @@
       setzeInhalt("<div class='tt-leer'>Noch keine Resultate.</div>", { n: 0 });
       return;
     }
+    if (beamer) {
+      zeichneBeamer(resultate, [programm === ALLE ? "" : programmText(programm), ak === ALLE ? "" : ak,
+        geraet === ALLE ? "" : geraet].filter(Boolean).join(" · "));
+      return;
+    }
     const teile = [`<div class="tt-anzahl">${resultate.length} Resultate, neueste zuerst</div><div class="tt-liste">`];
     resultate.slice(0, MAX_LIVE).forEach((r, i) => teile.push(karte(i + 1, r)));
     teile.push("</div>");
     if (resultate.length > MAX_LIVE) teile.push(`<div class="tt-anzahl">Angezeigt: die neuesten ${MAX_LIVE}.</div>`);
     setzeInhalt(teile.join(""), { n: resultate.length, erster: kurz(resultate[0]) });
+  }
+
+  // Beamer: neueste Noten als grosse Zeilen; neu Erschienenes hervorgehoben (nicht, was beim Start schon da war).
+  function zeichneBeamer(resultate, filterText) {
+    el.unter.hidden = !filterText;
+    el.unter.textContent = filterText;
+    const jetzt = Date.now();
+    const ersterLauf = !gesehen.size;
+    const zeilenHtml = resultate.slice(0, BEAMER_MAX).map((r) => {
+      const k = `${r.ergebnis_id}|${r.geaendert_am}`;
+      if (!gesehen.has(k)) gesehen.set(k, ersterLauf ? 0 : jetzt);
+      return beamerZeile(r, jetzt - gesehen.get(k) < NEU_MS);
+    });
+    setzeInhalt(`<div class="tt-bliste">${zeilenHtml.join("")}</div>`, { n: resultate.length, erster: kurz(resultate[0]) });
+    passeBeamer();
+  }
+
+  function beamerZeile(r, neu) {
+    const technik = r.bereich === "technik";
+    const meta = [r.verein, r.programm ? programmText(r.programm) : "", r.ak].filter(Boolean).map(h).join(" · ");
+    const d = new Date(r.geaendert_am);
+    const was = [technik ? r.anzeige : r.test, Number.isNaN(d.getTime()) ? "" : uhrFormat.format(d)].filter(Boolean).map(h)
+      .join(" · ");
+    return `<div class="tt-bzeile${neu ? " tt-neu" : ""}">`
+      + `<div class="tt-btext"><strong>${h(r.vorname)} ${h(r.name)}</strong><small>${meta}</small></div>`
+      + `<div class="tt-btext tt-bwas"><strong>${h(geraetName(r))}</strong><small>${was}</small></div>`
+      + `<span class="tt-bs">${technik ? `S ${h(zahl(r.S))}` : ""}</span>`
+      + `<b class="tt-bnote"><small>${technik ? "T" : "Pkt"}</small>${h(zahl(technik ? r.T : r.punkte))}</b></div>`;
+  }
+
+  // Nur ganze Zeilen zeigen: was unten nicht mehr ganz Platz hat, ausblenden (kein Scrollen am Beamer).
+  function passeBeamer() {
+    if (!beamer) return;
+    const liste = [...el.inhalt.querySelectorAll(".tt-bzeile")];
+    for (const zl of liste) zl.hidden = false;
+    let voll = false;
+    for (const zl of liste) {
+      voll = voll || zl.getBoundingClientRect().bottom > window.innerHeight - 4;
+      zl.hidden = voll;
+    }
+  }
+
+  async function wachHalten() {
+    if (!beamer || wachSperre || document.visibilityState !== "visible" || !navigator.wakeLock) return;
+    try {
+      wachSperre = await navigator.wakeLock.request("screen");
+      wachSperre.addEventListener("release", () => { wachSperre = null; });
+    } catch { /* ohne Wake Lock weiter: Energiesparen am Gerät ausschalten */ }
   }
 
   // Wie app._ranglisten: Programm, AK, Ebene; Reihenfolge, Ränge und Totale unverändert aus der Publikation.
@@ -897,7 +959,8 @@
   function ausAdresse() {
     const a = new URLSearchParams(location.search);
     const alt = a.get("ansicht") === "rangliste" && a.get("art") === "technik" && a.get("sicht") === "rotation";
-    ansicht = alt && z.ansichten.has("geraet") ? "geraet" : z.ansichten.has(a.get("ansicht")) ? a.get("ansicht") : "live";
+    ansicht = beamer ? "live" : alt && z.ansichten.has("geraet") ? "geraet"
+      : z.ansichten.has(a.get("ansicht")) ? a.get("ansicht") : "live";
     auswahl.programm = a.get("p") || ALLE;
     auswahl.ak = a.get("ak") || ALLE;
     art = R && R.ARTEN.includes(a.get("art")) ? a.get("art") : "gesamt";
@@ -907,8 +970,9 @@
 
   // ── Start ─────────────────────────────────────────────────────────────────────────────────────────
   const start = new URLSearchParams(location.search);
-  const gewuenscht = start.get("ansicht") === "rangliste" && start.get("art") === "technik" && start.get("sicht") === "rotation"
-    ? "geraet" : start.get("ansicht") || "live";  // frühere Adresse von „Gerät & Rotation“
+  if (beamer) document.documentElement.classList.add("tt-beamer");
+  const gewuenscht = beamer ? "live" : start.get("ansicht") === "rangliste" && start.get("art") === "technik"
+    && start.get("sicht") === "rotation" ? "geraet" : start.get("ansicht") || "live";  // frühere Adresse von „Gerät & Rotation“
   el.zurueck.href = location.pathname;  // Übersicht dieser Seite (nicht mehr die Streamlit-Übersicht)
   for (const a of document.querySelectorAll("[data-ziel]")) a.href = streamlitLink(a.dataset.ziel);
   for (const a of document.querySelectorAll("[data-ansicht]")) {  // hier nicht angeboten: Pille führt nach Streamlit
@@ -976,10 +1040,12 @@
     nachTakt();
   });
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") { if (!laeuft) takt(); } else { clearTimeout(timer); timer = null; }
+    if (document.visibilityState === "visible") { wachHalten(); if (!laeuft) takt(); } else { clearTimeout(timer); timer = null; }
   });
   window.addEventListener("online", () => { if (!laeuft) takt(); });
   window.addEventListener("offline", zeigeStatus);
+  window.addEventListener("resize", passeBeamer);
   setInterval(zeigeStatus, 1000);
+  wachHalten();
   takt();
 })();

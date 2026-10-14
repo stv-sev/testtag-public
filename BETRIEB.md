@@ -149,6 +149,7 @@ gültig und führt mit einem Klick dorthin.
 |---|---|---|
 | Übersicht (Live, Demnächst, Archiv) | statische Seite | `https://stv-sev.github.io/testtag-public/` |
 | Live | statische Seite | `…/?t=<slug>` (`&p=…&ak=…&g=<Gerät>`) |
+| Beamer (neueste Noten, dunkel, ohne Bedienung) | statische Seite | `…/?t=<slug>&beamer=1` (`&p=…&ak=…&g=<Gerät>`); im Browser F11 |
 | Gerät | statische Seite | `…/?t=<slug>&ansicht=geraet&p=…&g=<Gerät>&r=<Rotation>` |
 | Ranglisten | statische Seite | `…/?t=<slug>&ansicht=rangliste` (`&p=…&ak=…&art=technik\|athletik`) |
 | Startliste | statische Seite | `…/?t=<slug>&ansicht=startliste` (`&p=…`) |

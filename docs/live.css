@@ -127,3 +127,34 @@ body { margin: 0; background: #fff; color: #0D4E73; font-family: "Source Sans Pr
   .tt-nav { gap: 4px; }
   .tt-filter { gap: 10px; }
 }
+/* Beamer (`&beamer=1`): dunkler Grund, helle Schrift, keine Bedienung; die Schrift wächst mit der Bildschirmhöhe,
+   damit immer etwa gleich viele Zeilen Platz haben. */
+html.tt-beamer { color-scheme: dark; background: #06192A; }
+.tt-beamer body { background: #06192A; color: #EAF3F8; font-size: clamp(16px, min(3.4vh, 2vw), 80px); line-height: 1.25;
+                  overflow: hidden; cursor: none; }
+.tt-beamer .tt-seite { max-width: none; padding: .5em 1em 0; }
+.tt-beamer .tt-zurueck, .tt-beamer .tt-nav, .tt-beamer .tt-filter, .tt-beamer .tt-arten, .tt-beamer .tt-anzahl,
+.tt-beamer .tt-fuss, .tt-beamer .tt-stand, .tt-beamer .tt-hinweise { display: none !important; }
+.tt-beamer .tt-kopf { flex-direction: row; text-align: left; gap: .8em; padding: .4em .8em; margin: 0 0 .4em; border-radius: .35em; }
+.tt-beamer .tt-kopf > div:nth-child(2) { flex: 1; min-width: 0; }
+.tt-beamer .tt-logo { padding: .25em .6em; border-radius: .3em; }
+.tt-beamer .tt-logo img { height: 1.3em; }
+.tt-beamer .tt-kopf h1 { font-size: 1.1em; }
+.tt-beamer .tt-unter { font-size: .65em; color: #BFE0EF; margin-top: 0; }
+.tt-beamer .tt-badge { font-size: .65em; padding: .2em .7em; }
+.tt-beamer .tt-punkt { width: .6em; height: .6em; }
+.tt-beamer .tt-warnung { font-size: .6em; padding: .4em .8em; background: #4A3A00; color: #FFE9A8; }
+.tt-beamer .tt-warnung.offline { background: #5A1414; color: #FFD6D6; }
+.tt-beamer .tt-leer { color: #9FC3D6; font-size: 1em; padding: 3em 0; }
+.tt-bliste { display: flex; flex-direction: column; gap: .25em; }
+.tt-bzeile { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .7fr) 4em 5.6em; align-items: center; gap: .8em;
+             background: #0D2E45; border-left: .22em solid transparent; border-radius: .3em; padding: .25em .8em; }
+.tt-bzeile.tt-neu { background: #1B4466; border-left-color: #E6007E; }
+.tt-btext strong, .tt-btext small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-btext strong { font-weight: 700; color: #fff; }
+.tt-btext small { font-size: .6em; color: #9FC3D6; }
+.tt-bwas strong { font-weight: 600; color: #CFE6F2; }
+.tt-bs { text-align: right; font-size: .8em; color: #9FC3D6; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tt-bnote { text-align: right; font-size: 1.45em; font-weight: 700; color: #fff; white-space: nowrap;
+            font-variant-numeric: tabular-nums; }
+.tt-bnote small { font-size: .42em; font-weight: 600; color: #9FC3D6; margin-right: .35em; }
