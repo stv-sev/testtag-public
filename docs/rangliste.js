@@ -262,7 +262,7 @@
     const vorhanden = { technik: hatResultate(eigene, "technik"), athletik: hatResultate(eigene, "athletik"),
       beweglichkeit: eigene.some((r) => r.bereich === "beweglichkeit"), kraft: eigene.some((r) => r.bereich === "kraft"),
       gesamt: eigene.length > 0 };  // nie scheinbar 0
-    const inhalt = d === null ? "<div class='tt-dhinweis'>Die Aufschlüsselung ist zurzeit nicht verfügbar.</div>"
+    const inhalt = d === null ? "<div class='tt-dhinweis'>Details nicht verfügbar.</div>"
       : DETAILS[art](e, d, vorhanden, k);
     return `<div class='tt-karte tt-rangkarte'><details${k === undefined ? "" : ` data-k='${h(k)}'`}><summary><div class='tt-karte-kopf'>`
       + `<div class='tt-rang'${stil} title='Rang ${h(rang)}'>${h(rang)}</div>`
@@ -280,8 +280,7 @@
       return karte(e, art, eigene, details(e, eigene, struktur, alle), mitSchluessel ? `${art}|${pyStr(e.teilnehmer ?? i)}` : undefined);
     });
     return [hinweis ? `<div class='tt-anzahl'>${h(hinweis)}</div>` : "", "<div class='tt-liste tt-rangliste'>", ...karten,
-      "</div><div class='tt-anzahl'>– = noch kein veröffentlichtes Resultat. Gleiche Punktzahl ergibt den gleichen Rang. "
-      + "Turner antippen für Details; T = Linienpunkte.</div>"].join("");
+      "</div><div class='tt-anzahl'>– = noch keine Note</div>"].join("");
   }
 
   const ziel = typeof window !== "undefined" ? window : globalThis;

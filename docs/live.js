@@ -59,7 +59,7 @@
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
   const HEX64 = /^[0-9a-f]{64}$/;
   const STATUS = ["live", "vorbereitet", "archiviert"];
-  const VERALTET = "Aktualisierung vorübergehend nicht möglich – letzter gültiger Stand wird angezeigt";
+  const VERALTET = "Verbindung unterbrochen";
   const R = window.TT_RANGLISTE;
 
   const $ = (id) => document.getElementById(id);
@@ -80,6 +80,15 @@
   const zeitText = (iso, mitDatum) => {
     const d = new Date(iso);
     return Number.isNaN(d.getTime()) ? "" : (mitDatum ? datumFormat : zeitFormat).format(d).replace(",", "");
+  };
+  const tagFormat = new Intl.DateTimeFormat("de-CH", { timeZone: "Europe/Zurich", day: "2-digit", month: "2-digit", year: "numeric" });
+  const uhrFormat = new Intl.DateTimeFormat("de-CH", { timeZone: "Europe/Zurich", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  // „15:32“ für heute, sonst „13.10.2026 15:32“ (Statuszeile, Hinweise)
+  const standText = (iso) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const heute = tagFormat.format(new Date()) === tagFormat.format(d);
+    return `${heute ? "" : `${tagFormat.format(d)} `}${uhrFormat.format(d)}`;
   };
   const akRang = (ak) => { const m = /\d+/.exec(ak || ""); return m ? Number(m[0]) : 999; };
   const vergleicheAk = (a, b) => akRang(a) - akRang(b) || (a < b ? -1 : a > b ? 1 : 0);
@@ -473,9 +482,8 @@
   }
 
   function badge(status) {
-    const [klasse, text] = status === "live" ? ["live", "Live – wird laufend aktualisiert"]
-      : status === "archiviert" ? ["archiv", "Archiv – abgeschlossener Testtag, keine Aktualisierung"]
-        : ["demnaechst", "Vorbereitet – noch nicht gestartet"];
+    const [klasse, text] = status === "live" ? ["live", "Live"] : status === "archiviert" ? ["archiv", "Archiv"]
+      : ["demnaechst", "Demnächst"];
     return `<span class="tt-badge ${klasse}">${klasse === "live" ? "<span class='tt-punkt'></span>" : ""}${h(text)}</span>`;
   }
 
@@ -558,7 +566,7 @@
     const { programme, programm, aks, ak } = liveAuswahl(koepfe);
     if (!programme.length) {
       el.filter.hidden = true; el.hinweise.innerHTML = "";
-      setzeInhalt("<div class='tt-leer'>Es sind noch keine Live-Resultate veröffentlicht.</div>", { n: 0 });
+      setzeInhalt("<div class='tt-leer'>Noch keine Resultate.</div>", { n: 0 });
       return;
     }
     el.filter.hidden = false;
@@ -589,13 +597,13 @@
     if (geraete.length) optionen(el.geraet, geraete, geraet, (g) => g, true);
     const resultate = geraet === ALLE ? alle : alle.filter((r) => geraetName(r) === geraet);
     if (!resultate.length) {
-      setzeInhalt("<div class='tt-leer'>Für diese Auswahl sind noch keine Resultate veröffentlicht.</div>", { n: 0 });
+      setzeInhalt("<div class='tt-leer'>Noch keine Resultate.</div>", { n: 0 });
       return;
     }
-    const teile = [`<div class="tt-anzahl">${resultate.length} Resultate – neueste Änderung zuerst</div><div class="tt-liste">`];
+    const teile = [`<div class="tt-anzahl">${resultate.length} Resultate, neueste zuerst</div><div class="tt-liste">`];
     resultate.slice(0, MAX_LIVE).forEach((r, i) => teile.push(karte(i + 1, r)));
     teile.push("</div>");
-    if (resultate.length > MAX_LIVE) teile.push(`<div class="tt-anzahl">Die neuesten ${MAX_LIVE} Resultate werden angezeigt.</div>`);
+    if (resultate.length > MAX_LIVE) teile.push(`<div class="tt-anzahl">Angezeigt: die neuesten ${MAX_LIVE}.</div>`);
     setzeInhalt(teile.join(""), { n: resultate.length, erster: kurz(resultate[0]) });
   }
 
@@ -605,7 +613,7 @@
     const { programme, programm, aks, ak } = ranglistenAuswahl(koepfe);
     if (!programme.length) {
       el.filter.hidden = true; el.arten.hidden = true;
-      setzeInhalt("<div class='tt-leer'>Es ist noch keine Rangliste veröffentlicht.</div>", { n: 0 });
+      setzeInhalt("<div class='tt-leer'>Noch keine Rangliste.</div>", { n: 0 });
       return;
     }
     el.filter.hidden = false; el.arten.hidden = false;
@@ -621,7 +629,7 @@
     const gruppe = zeilen.get(sr).gruppen.find((g) => g.liste === art);
     const eintraege = gruppe ? gruppe.eintraege : [];
     if (!eintraege.length) {
-      setzeInhalt("<div class='tt-leer'>Für diese Auswahl ist noch keine Rangliste veröffentlicht.</div>", { n: 0 });
+      setzeInhalt("<div class='tt-leer'>Noch keine Rangliste.</div>", { n: 0 });
       return;
     }
     const alle = zeilen.has(sl) ? zeilen.get(sl).resultate : [];
@@ -638,7 +646,7 @@
       el.filter2.hidden = true; el.hinweise.innerHTML = "";
       setzeInhalt(`<div class='tt-leer'>${h(text)}</div>`, info(n));
     };
-    if (!programm) { el.filter.hidden = true; leer("Es ist noch keine Startliste veröffentlicht."); return; }
+    if (!programm) { el.filter.hidden = true; leer("Noch keine Startliste."); return; }
     el.filter.hidden = false;
     optionen(el.programm, programme, programm, programmText, false);
     optionen(el.ak, aks, ak, (a) => a, true);
@@ -646,7 +654,7 @@
     if (!schl.every((s) => zeilen.has(s))) { leer("Wird geladen …", -1); return; }
     const start = zeilen.get(schluessel(STARTLISTE, programm, ""));
     const rot = start && start.einteilung;
-    if (!rot) { leer("Die Einteilung nach Gerät wird mit der nächsten Publikation verfügbar."); return; }
+    if (!rot) { leer("Einteilung folgt."); return; }
 
     const geraete = rot.geraete;
     const geraet = geraete.includes(auswahl.geraet) ? auswahl.geraet : geraete[0];
@@ -664,15 +672,14 @@
     if (el.rotation.dataset.html !== html) { el.rotation.innerHTML = html; el.rotation.dataset.html = html; }
     el.rotation.value = auswahl.rotation === null ? "" : String(auswahl.rotation);
     el.rotation.disabled = !rot.freigegeben;
-    el.hinweise.innerHTML = `<div>${h(programmText(programm))}: ${h(rot.freigegeben >= rot.rotationen ? "Alle Rotationen freigegeben."
-      : rot.freigegeben ? `Resultate bis Rotation ${rot.freigegeben} von ${rot.rotationen} freigegeben.`
-        : "Noch keine Rotation freigegeben.")}</div>`;
+    el.hinweise.innerHTML = `<div>${h(programmText(programm))}: ${h(rot.freigegeben >= rot.rotationen ? "Alle Rotationen"
+      : rot.freigegeben ? `Stand nach Rotation ${rot.freigegeben} von ${rot.rotationen}` : "Noch keine Rotation")}</div>`;
     if (!rot.freigegeben) {
-      setzeInhalt("<div class='tt-leer'>Für dieses Programm ist noch keine Rotation freigegeben.</div>", info(0));
+      setzeInhalt("<div class='tt-leer'>Noch keine Rotation.</div>", info(0));
       return;
     }
     if (auswahl.rotation === null) {
-      setzeInhalt("<div class='tt-leer'>Rotation wählen, um die an diesem Gerät eingeteilte Riege zu sehen.</div>", info(0));
+      setzeInhalt("<div class='tt-leer'>Rotation wählen.</div>", info(0));
       return;
     }
 
@@ -704,7 +711,7 @@
       + `${startgeraet ? ` · Riege Startgerät ${h(startgeraet)}` : ""}${ak === ALLE ? "" : ` · ${h(ak)}`}</div>`;
     if (!turner.length) {
       setzeInhalt(`${kopf}<div class='tt-leer'>${eingeteilt.length
-        ? "In dieser Riege turnt niemand dieser Altersklasse." : "In dieser Rotation ist an diesem Gerät keine Riege eingeteilt."}</div>`,
+        ? "Niemand aus dieser AK." : "Keine Riege an diesem Gerät."}</div>`,
       info(0, { riege: startgeraet }));
       return;
     }
@@ -723,7 +730,7 @@
       const inhalt = posten.length
         ? `<div class='tt-dz tt-total'><span>${beweglichkeit ? "Total Beweglichkeit" : `Gerätetotal ${h(geraet)}`}</span>`
           + `<b>${h(R.zahl(total))}</b></div><div class='tt-linien'>${linien}</div>`
-        : "<div class='tt-dhinweis'>Noch kein veröffentlichtes Resultat an diesem Gerät.</div>";
+        : "<div class='tt-dhinweis'>Noch keine Note.</div>";
       const meta = [t.verein, t.ak].filter(Boolean).map(h).join(" · ");
       return `<div class='tt-karte tt-rangkarte'><details data-k='${h(`rot|${geraet}|${auswahl.rotation}|${t.teilnehmer}`)}'><summary>`
         + `<div class='tt-karte-kopf'><div class='tt-nr' title='Startposition ${h(nr)}'>${h(nr)}</div>`
@@ -731,9 +738,7 @@
         + `<div class='tt-wert'><div class='tt-note'>${h(R.zahl(total))}</div></div><i class='tt-pfeil'>▾</i></div>`
         + `</summary><div class='tt-details'>${inhalt}</div></details></div>`;
     });
-    setzeInhalt(`${kopf}<div class='tt-liste tt-rangliste'>${karten.join("")}</div><div class='tt-anzahl'>In Startreihenfolge, `
-      + `ohne Rang. – = noch kein veröffentlichtes Resultat. ${beweglichkeit ? "Turner antippen für die Tests."
-        : "Turner antippen für die Linien; T = Linienpunkte."}</div>`,
+    setzeInhalt(`${kopf}<div class='tt-liste tt-rangliste'>${karten.join("")}</div><div class='tt-anzahl'>– = noch keine Note</div>`,
     info(turner.length, { riege: startgeraet, mitNote: turner.filter(([, t]) => resultate.has(t.teilnehmer)).length }));
   }
 
@@ -748,7 +753,7 @@
     const listen = schl.map((s) => [koepfe.get(s).programm, zeilen.get(s)]).sort(([a], [b]) => vergleicheProgramm(a, b))
       .map(([p, zl]) => [p, zl.gruppen.filter((g) => Array.isArray(g.teilnehmer) && g.teilnehmer.length)])
       .filter(([, gruppen]) => gruppen.length);
-    if (!listen.length) { setzeInhalt("<div class='tt-leer'>Es ist noch keine Startliste veröffentlicht.</div>", { n: 0 }); return; }
+    if (!listen.length) { setzeInhalt("<div class='tt-leer'>Noch keine Startliste.</div>", { n: 0 }); return; }
     const teile = [];
     for (const [p, gruppen] of listen) {
       teile.push(`<div class='tt-programm'>${h(programmText(p))}</div>`);
@@ -774,7 +779,7 @@
     const schl = benoetigt(koepfe);
     if (!schl.every((s) => zeilen.has(s))) { setzeInhalt("<div class='tt-leer'>Wird geladen …</div>", { n: -1 }); return; }
     const bloecke = schl.length ? zeilen.get(schl[0]).gruppen.filter((b) => Array.isArray(b.zeilen) && b.zeilen.length) : [];
-    if (!bloecke.length) { setzeInhalt("<div class='tt-leer'>Es ist noch kein Zeitplan veröffentlicht.</div>", { n: 0 }); return; }
+    if (!bloecke.length) { setzeInhalt("<div class='tt-leer'>Noch kein Zeitplan.</div>", { n: 0 }); return; }
     const teile = [];
     for (const b of bloecke) {
       teile.push(`<div class='tt-tabelle tt-zeitplan'><div class='tt-titel'>${h(programmText(b.programm ?? ""))}</div>`);
@@ -796,17 +801,15 @@
     const zeitpunkte = [...koepfe.values()].map((k) => k.stand_am);
     const datenstand = zeitpunkte.length ? zeitpunkte.reduce((a, b) => (Date.parse(a) > Date.parse(b) ? a : b))
       : testtag.stand_am;
-    el.stand.textContent = testtag.status === "archiviert" ? "" : `Datenstand ${zeitText(datenstand, true)} · geprüft `
-      + `${letzterErfolg ? zeitText(new Date(letzterErfolg).toISOString()) : "–"}`;
+    el.stand.textContent = testtag.status === "archiviert" ? "" : `Stand ${standText(datenstand)}`;
     const veraltet = testtag.status !== "archiviert" && (Date.now() - letzterErfolg > Math.max(VERALTET_NACH, taktMs + 7000)
       || (nachholen && fehlerFolge > 0));
     el.warnung.hidden = !veraltet;
     if (veraltet) {
       const offline = navigator.onLine === false;
       el.warnung.className = `tt-warnung${offline ? " offline" : ""}`;
-      el.warnung.textContent = `${offline ? "Keine Internetverbindung. " : ""}${VERALTET} (Stand `
-        + `${letzterErfolg ? zeitText(new Date(letzterErfolg).toISOString()) : "–"}). Die Seite versucht es `
-        + "automatisch erneut.";
+      el.warnung.textContent = `${offline ? "Keine Internetverbindung" : VERALTET}, angezeigt wird der Stand von `
+        + `${letzterErfolg ? standText(new Date(letzterErfolg).toISOString()) : "–"}.`;
     }
   }
 
@@ -824,13 +827,12 @@
     el.badge.innerHTML = badge("archiviert");
     el.filter.hidden = true; el.nav.hidden = true; el.arten.hidden = true; el.hinweise.innerHTML = "";
     el.stand.textContent = "";
-    setzeInhalt(`<div class='tt-leer'>Dieser Testtag ist abgeschlossen. Ranglisten und Resultate stehen im `
+    setzeInhalt(`<div class='tt-leer'>Abgeschlossen. Resultate und Ranglisten im `
       + `<a href="${h(streamlitLink(ansicht === "live" ? null : ansicht))}">Archiv</a>.</div>`, { n: 0 });
   }
 
   function zeigeWarten() {
-    setzeInhalt("<div class='tt-leer'>Die Daten sind zurzeit nicht erreichbar. Die Seite versucht es automatisch "
-      + "erneut.</div>", { n: -1 });
+    setzeInhalt("<div class='tt-leer'>Daten zurzeit nicht erreichbar, neuer Versuch läuft.</div>", { n: -1 });
   }
 
   function melde(art, code) {
@@ -841,7 +843,7 @@
   let uebersichtFehler = 0;
   let uebersichtTimer = null;
   let uebersichtGezeigt = false;
-  const KURZ_BADGE = { live: ["live", "LIVE"], vorbereitet: ["demnaechst", "Demnächst"], archiviert: ["archiv", "Archiv"] };
+  const KURZ_BADGE = { live: ["live", "Live"], vorbereitet: ["demnaechst", "Demnächst"], archiviert: ["archiv", "Archiv"] };
 
   async function uebersicht() {
     clearTimeout(uebersichtTimer);
@@ -861,7 +863,7 @@
       naechster = Math.min(MAX_PAUSE, TAKT_LIVE * 2 ** (uebersichtFehler - 1));
       melde("fehler", e && e.code ? e.code : "UNBEKANNT");
       if (!uebersichtGezeigt) zeigeWarten();
-      else { el.warnung.hidden = false; el.warnung.className = "tt-warnung"; el.warnung.textContent = `${VERALTET}. Die Seite versucht es automatisch erneut.`; }
+      else { el.warnung.hidden = false; el.warnung.className = "tt-warnung"; el.warnung.textContent = `${VERALTET}.`; }
     } finally {
       if (document.visibilityState !== "hidden") uebersichtTimer = setTimeout(uebersicht, naechster);
     }
@@ -870,10 +872,8 @@
   function zeigeUebersicht(tage) {
     uebersichtGezeigt = true;
     el.titel.textContent = "Testtage";
-    el.unter.textContent = "Turnsport Aargau · Live-Resultate, Ranglisten, Startlisten";
-    el.unter.hidden = false;
     document.title = "Testtage";
-    if (!tage.length) { setzeInhalt("<div class='tt-leer'>Zurzeit ist kein Testtag veröffentlicht.</div>", { n: 0, uebersicht: true }); return; }
+    if (!tage.length) { setzeInhalt("<div class='tt-leer'>Zurzeit kein Testtag.</div>", { n: 0, uebersicht: true }); return; }
     const teile = [];
     for (const [status, ueberschrift] of [["live", "Live"], ["vorbereitet", "Demnächst"], ["archiviert", "Archiv"]]) {
       const gruppe = tage.filter((t) => t.status === status);

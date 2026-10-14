@@ -196,7 +196,7 @@ const gezeichnet = {};
   // Unterbruch
   await ctx.setOffline(true); sb.netz = false;
   await page.waitForSelector("#warnung:not([hidden])", { timeout: 25000 });
-  pruefe((await page.textContent("#warnung")).includes("letzter gültiger Stand") && await page.locator(".tt-rangkarte").count() > 0,
+  pruefe((await page.textContent("#warnung")).includes("angezeigt wird der Stand von") && await page.locator(".tt-rangkarte").count() > 0,
     "offline: Hinweis, letzter gültiger Stand bleibt sichtbar");
   await page.screenshot({ path: `${bilder}/mobil-rangliste-offline.png` });
   await ctx.setOffline(false); sb.netz = true;
@@ -224,7 +224,7 @@ const gezeichnet = {};
   pruefe(true, "wieder öffentlich: Rangliste erscheint wieder");
   // Archiv
   sb.status = "archiviert";
-  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("abgeschlossen"), null, { timeout: 12000 });
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Abgeschlossen"), null, { timeout: 12000 });
   pruefe(await page.getAttribute("#inhalt a", "href") === `${STREAMLIT}/?t=${SLUG}&ansicht=rangliste`, "Archiv: Link ins Streamlit-Archiv (Ranglisten)");
   pruefe(!(await page.content()).includes("Lea"), "Archiv: keine Personendaten der statischen Seite");
   sb.status = "live";
@@ -280,7 +280,7 @@ const gezeichnet = {};
   sb.stand = staende.r2;
   // Pillen: Live · Gerät · Ranglisten · Startliste · Zeitplan
   const pillen = (await page.locator("#nav .tt-pille").allTextContents()).map((t) => t.trim());
-  pruefe(JSON.stringify(pillen) === JSON.stringify(["⚡ Live", "🤸 Gerät", "🏅 Ranglisten", "📋 Startliste", "🕐 Zeitplan"]),
+  pruefe(JSON.stringify(pillen) === JSON.stringify(["Live", "Gerät", "Ranglisten", "Startliste", "Zeitplan"]),
     `Pillen in der Reihenfolge Live · Gerät · Ranglisten · Startliste · Zeitplan (${pillen.join(" · ")})`);
   // Live: Gerätefilter (Geräte mit Resultaten, Reihenfolge der Stationsfolge), Adresse &g=, bleibt beim Wechsel
   await page.goto(adresse("&p=AK5-AK9%2B"));
@@ -314,7 +314,7 @@ const gezeichnet = {};
   pruefe(JSON.stringify(await page.locator("#geraet option").allTextContents())
     === JSON.stringify(["Boden", "Pferd", "Ringe", "Beweglichkeit", "Sprung", "Barren", "Trampolin", "Reck"]),
   "Geräte: alle Stationen der Startliste in Stationsfolge, auch Beweglichkeit");
-  pruefe((await page.textContent("#hinweise")).includes("Resultate bis Rotation 2 von 8 freigegeben."), "Hinweis Freigabe (keine laufende Rotation)");
+  pruefe((await page.textContent("#hinweise")).includes("Stand nach Rotation 2 von 8"), "Hinweis Freigabe (keine laufende Rotation)");
   pruefe(await page.locator("[data-ansicht=geraet].aktiv").count() === 1 && await page.locator("#arten").isHidden()
     && await page.inputValue("#ak") === "Alle", "Pille Gerät aktiv, keine Ranglistenebenen, AK optional (Alle)");
   await page.selectOption("#rotation", "1");
@@ -348,7 +348,7 @@ const gezeichnet = {};
   await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Rotation 2 · Pferd · Riege Startgerät Boden"));
   pruefe((await page.locator("#inhalt .tt-note").allTextContents()).join() === "5", "Pferd, Rotation 2: Riege Boden (Lea 5)");
   await page.selectOption("#geraet", "Reck");
-  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("keine Riege eingeteilt"));
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Keine Riege an diesem Gerät"));
   pruefe(true, "Reck, Rotation 2: keine Riege (Startgerät Trampolin leer)");
   pruefe(await breite(page), "Smartphone: Gerät ohne waagrechte Scrollbar");
   // Beweglichkeit als Gerät: Riege der Rotation 4 (Startgerät Boden) mit Total Beweglichkeit und Einzeltests
@@ -399,11 +399,11 @@ const gezeichnet = {};
   // Freigabe 0 und ältere Publikation ohne Einteilung
   sb.stand = staende.r0;
   await page.goto(adresse("&ansicht=geraet&p=AK5-AK9%2B&r=1"));
-  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("noch keine Rotation freigegeben"));
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Noch keine Rotation."));
   pruefe(await page.isDisabled("#rotation") && !params().has("r") && !(await text()).includes("Lea"), "Freigabe 0: keine Rotation wählbar");
   sb.stand = staende.ohne_struktur;
   await page.goto(adresse("&ansicht=geraet&p=AK5-AK9%2B&r=1"));
-  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("mit der nächsten Publikation verfügbar"));
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Einteilung folgt"));
   pruefe(!(await text()).includes("Lea"), "ältere Publikation ohne Einteilung: Hinweis statt geratener Einteilung");
   // Korrektur während der Anzeige: offene Karte bleibt offen
   sb.stand = staende.r8;
@@ -503,7 +503,7 @@ for (const ansicht of ["startliste", "zeitplan"]) {  // Archiv: Link ins Streaml
   const { ctx, page } = await kontext({ width: 390, height: 844 }, true);
   sb.status = "archiviert";
   await page.goto(adresse(`&ansicht=${ansicht}`));
-  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("abgeschlossen"));
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Abgeschlossen"));
   pruefe(await page.getAttribute("#inhalt a", "href") === `${STREAMLIT}/?t=${SLUG}&ansicht=${ansicht}`, `Archiv aus ${ansicht}: Link ins Streamlit-Archiv`);
   sb.status = "live";
   await ctx.close();

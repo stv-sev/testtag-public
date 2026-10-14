@@ -24,7 +24,7 @@ from streamlit.testing.v1 import AppTest  # noqa: E402
 APP = str(_ROOT / "app.py")
 VERBOTEN = [TEST_SECRET_KEY, TEST_PUBLISHABLE_KEY, "sb_secret_", "Failing row", "Traceback", "example-ref",
             "HTTP_503", "PROBEINHALT", "ergebnis_id", "excel_id", "TAL", "sprung-1", "sprung-2", "Bearer"]
-NAV = ["⚡ Live", "🏅 Ranglisten", "📋 Startliste", "🕐 Zeitplan"]
+NAV = ["Live", "Ranglisten", "Startliste", "Zeitplan"]
 _BILD = re.compile(r"data:image/[a-z]+;base64,[A-Za-z0-9+/=]+")
 
 
@@ -149,9 +149,9 @@ class AppTests(unittest.TestCase):
         self.assert_clean(at)
 
     def test_uniform_header_logo_status_and_footer_in_every_view(self):
-        for kennung, badge in ((None, None), (TT_SLUG, "Live – wird laufend aktualisiert"),
-                               (ARCHIV_SLUG, "Archiv – abgeschlossener Testtag, keine Aktualisierung"),
-                               ("synth-testtag-2027", "Vorbereitet – noch nicht gestartet")):
+        for kennung, badge in ((None, None), (TT_SLUG, "Live"),
+                               (ARCHIV_SLUG, "Archiv"),
+                               ("synth-testtag-2027", "Demnächst")):
             with self.subTest(kennung=kennung):
                 at = self.app(kennung)
                 koepfe = [m for m in at.markdown if "class='tt-kopf'" in str(m.value)]
@@ -217,7 +217,7 @@ class AppTests(unittest.TestCase):
         at = self.app(TT_SLUG, live_url=basis)
         roh = self.roh(at)
         self.assertIn(f"href='{basis}?t={TT_SLUG}'", roh)
-        self.assertIn("⚡ Live-Resultate öffnen", self.text(at))
+        self.assertIn("Live-Resultate öffnen", self.text(at))
         radio = at.radio(key="bereich")
         self.assertEqual(radio.options, NAV[1:])
         self.assertIsNone(radio.value)
@@ -244,7 +244,7 @@ class AppTests(unittest.TestCase):
         roh = self.roh(at)
         self.assertIn(live, roh)
         self.assertIn(rangliste, roh)
-        self.assertIn("🏅 Ranglisten öffnen", self.text(at))
+        self.assertIn("Ranglisten öffnen", self.text(at))
         radio = at.radio(key="bereich")
         self.assertEqual(radio.options, NAV[2:])
         self.assertIsNone(radio.value)
@@ -252,7 +252,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(sum("/veroeffentlichung?" in c["url"] for c in self.api.calls), 0)  # nur der Testtag
         self.assert_clean(at)
         at = self.app(TT_SLUG, live_url=basis, statische_bereiche=["rangliste"])
-        self.assertIn("⚡ Live-Resultate öffnen", self.text(at))
+        self.assertIn("Live-Resultate öffnen", self.text(at))
         self.go(at, q.STARTLISTE)
         self.assertEqual(at.query_params["ansicht"], ["startliste"])
         self.assertIn(rangliste, self.roh(at))  # beide Pillen bleiben in der Navigation
@@ -270,8 +270,8 @@ class AppTests(unittest.TestCase):
     def test_all_areas_static_streamlit_shows_only_links_and_loads_no_data(self):
         basis = "https://stv-sev.github.io/testtag-public/"
         alle = ["rangliste", "startliste", "zeitplan"]
-        for ansicht, knopf in (("startliste", "📋 Startliste öffnen"), ("zeitplan", "🕐 Zeitplan öffnen"),
-                               (None, "⚡ Live-Resultate öffnen")):
+        for ansicht, knopf in (("startliste", "Startliste öffnen"), ("zeitplan", "Zeitplan öffnen"),
+                               (None, "Live-Resultate öffnen")):
             with self.subTest(ansicht=ansicht):
                 self.api.calls.clear()
                 at = self.app(TT_SLUG, ansicht=ansicht, live_url=basis, statische_bereiche=alle)
@@ -346,7 +346,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(times[0], "11:30:00")  # neueste Änderung (09:30 UTC) zuerst
         self.assertEqual(times, sorted(times, reverse=True))
         self.assertTrue(any("AK5–AK9+" in c for c in cards) and any("AK9–AK12" in c for c in cards))
-        self.assertIn(f"{len(cards)} Resultate – neueste Änderung zuerst", self.text(at))
+        self.assertIn(f"{len(cards)} Resultate, neueste zuerst", self.text(at))
         at.selectbox(key="live_programm").set_value(AK9).run()
         self.assertTrue(all("AK9–AK12" in c for c in self.cards(at)))
         self.assertEqual(at.selectbox(key="live_ak").options, ["Alle", "AK 9", "AK 10", "AK 11"])
@@ -402,7 +402,7 @@ class AppTests(unittest.TestCase):
         self.assertNotIn("<details class='tt-geraet' open", rl)
         at.radio(key="rl_art").set_value("athletik").run()
         self.assertEqual([p for _r, p in self.raenge(at)], ["8", "–", "–", "–"])
-        self.assertIn("Alle Rotationen freigegeben.", self.text(at))  # Hinweis des Publishers
+        self.assertIn("Alle Rotationen", self.text(at))  # Hinweis des Publishers
         self.assertEqual(len(at.dataframe), 0)
         self.assert_clean(at)
 
@@ -414,8 +414,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(at.radio(key="rl_art").value, "technik")
         hinweis = [i.value for i in at.info]
         self.assertEqual(len(hinweis), 1, hinweis)
-        self.assertTrue(hinweis[0].startswith("«Gerät» ist in dieser Ansicht nicht verfügbar. Angezeigt "
-                                              "wird die Technik-Rangliste"), hinweis)
+        self.assertEqual(hinweis[0], "«Gerät» gibt es hier nicht, angezeigt wird die Technik-Rangliste.")
         self.assertTrue(self.raenge(at))  # normale Technik-Rangliste mit Rängen
         self.assertFalse({"art", "sicht", "g", "r"} & set(at.query_params))  # einmal übernommen, Ebene frei wählbar
         self.versatz += 5
@@ -458,17 +457,15 @@ class AppTests(unittest.TestCase):
                        ("", "&amp;ansicht=geraet", "&amp;ansicht=rangliste", "&amp;ansicht=startliste",
                         "&amp;ansicht=zeitplan")]
         self.assertEqual(reihenfolge, sorted(reihenfolge))  # Live · Gerät · Ranglisten · Startliste · Zeitplan
-        self.assertIn("🤸 Gerät", self.text(at))
-        self.assertIn("Die Riegen je Gerät und Rotation werden auf einer eigenen, schnellen Seite angezeigt.",
-                      self.text(at))
-        self.assertIn("🤸 Gerät öffnen", self.text(at))
+        self.assertIn("Gerät", self.text(at))
+        self.assertIn("Gerät öffnen", self.text(at))
         self.assertEqual(sum("/veroeffentlichung?" in c["url"] for c in self.api.calls), 0)
         self.assert_clean(at)
         for schalter in (["startliste", "zeitplan"], []):  # Ranglisten in Streamlit: keine Pille „Gerät“
             with self.subTest(schalter=schalter):
                 at = self.app(TT_SLUG, live_url=basis, statische_bereiche=schalter)
                 self.assertNotIn("ansicht=geraet", self.roh(at))
-                self.assertNotIn("🤸 Gerät", self.text(at))
+                self.assertNotIn("Gerät", self.text(at))
 
     # ── Startliste und Zeitplan ──
     def test_startliste_grouped_by_program_and_apparatus_with_five_columns(self):
@@ -526,8 +523,8 @@ class AppTests(unittest.TestCase):
                 at.run()
                 self.assertEqual(self.cards(at), before)
                 warnings = [w.value for w in at.warning]
-                self.assertTrue(any(w.startswith("Aktualisierung vorübergehend nicht möglich – letzter gültiger "
-                                                 "Stand wird angezeigt (Stand ") for w in warnings), warnings)
+                self.assertTrue(any(w.startswith("Verbindung unterbrochen, angezeigt wird der Stand von ")
+                                    for w in warnings), warnings)
                 self.assert_clean(at)
         self.api.status, self.api.manipulieren = None, None
         self.versatz += 3
@@ -550,7 +547,7 @@ class AppTests(unittest.TestCase):
             self.versatz += 5
             at.run()
         self.assertEqual(self._zeilen_abrufe(), geladen)
-        self.assertIn("geprüft", self.text(at))
+        self.assertIn("Stand ", self.text(at))
         live = next(t for t in self.api.testtage if t["id"] == LIVE_ID)
         live["stand_am"] = "2026-10-09T09:15:00+00:00"  # Publisher setzt stand_am nach allen Zeilen
         self.versatz += 5
@@ -592,7 +589,7 @@ class AppTests(unittest.TestCase):
         self.versatz += 3
         for at in zuschauer:
             at.run()
-            self.assertIn("geprüft", self.text(at))
+            self.assertIn("Stand ", self.text(at))
         self.assertEqual(self._zeilen_abrufe(), 2)  # erster Abruf + ein gemeinsamer für den neuen Stand
 
     def test_hidden_testtag_is_not_shown_from_cache_or_session(self):
@@ -620,7 +617,7 @@ class AppTests(unittest.TestCase):
             self.versatz += 5
             at.run()
             self.assertEqual(self.cards(at), before)
-            self.assertTrue(any(w.value.startswith("Aktualisierung vorübergehend nicht möglich") for w in at.warning))
+            self.assertTrue(any(w.value.startswith("Verbindung unterbrochen") for w in at.warning))
         self.api.ausnahme = None
         for _ in range(4):  # Wiederherstellung spätestens nach der längsten gemeinsamen Sperrzeit (10 s)
             self.versatz += 5
@@ -699,7 +696,7 @@ class AppTests(unittest.TestCase):
     def test_first_load_error_shows_no_seemingly_valid_ranking(self):
         self.api.manipulieren = lambda rows: rows + [rows[0]]  # doppelter Primärschlüssel
         at = self.app(TT_SLUG)
-        self.assertIn("Die Daten dieses Testtags sind zurzeit nicht verfügbar", self.text(at))
+        self.assertIn("Daten zurzeit nicht erreichbar", self.text(at))
         self.assertEqual(self.cards(at), [])
         self.assertEqual(self.block(at, "tt-liste tt-rangliste"), "")
         self.assertIn(f"<h1>{TT_TITLE}</h1>", self.kopf(at))
@@ -710,7 +707,7 @@ class AppTests(unittest.TestCase):
         self.assertIsNone(__import__("app").takt_fuer("vorbereitet"))
         self.assertEqual(__import__("app").takt_fuer("live"), "5s")
         at = self.app(ARCHIV_SLUG)
-        self.assertIn("Archiv – abgeschlossener Testtag, keine Aktualisierung", klartext(self.kopf(at)))
+        self.assertIn("Archiv", klartext(self.kopf(at)))
         self.assertIn("tt-badge archiv", self.kopf(at))
         archiv_loads = lambda: sum("/archiv_snapshots?" in c["url"] for c in self.api.calls)  # noqa: E731
         self.assertEqual(archiv_loads(), 1)
@@ -742,7 +739,7 @@ class AppTests(unittest.TestCase):
     def test_damaged_snapshot_shows_neutral_message_without_fallback(self):
         self.api.manipulieren_archiv = lambda snaps: [dict(snaps[0], pruefsumme="0" * 64)]
         at = self.app(ARCHIV_SLUG)
-        self.assertIn("Die Daten dieses Testtags sind zurzeit nicht verfügbar", self.text(at))
+        self.assertIn("Daten zurzeit nicht erreichbar", self.text(at))
         self.assertEqual((self.block(at, "tt-liste tt-rangliste"), self.cards(at)), ("", []))
         self.assertFalse(any("/veroeffentlichung?" in c["url"] for c in self.api.calls))
         self.assert_clean(at)
@@ -758,7 +755,7 @@ class AppTests(unittest.TestCase):
         self.versatz += 300  # neues Kontrollfenster: nicht aus dem gemeinsamen Cache
         at.run()
         self.assertEqual(self.cards(at), before)
-        self.assertTrue(any(w.value.startswith("Aktualisierung vorübergehend nicht möglich") for w in at.warning))
+        self.assertTrue(any(w.value.startswith("Verbindung unterbrochen") for w in at.warning))
         self.assertEqual(archiv["status"], "archiviert")
         self.assert_clean(at)
 
@@ -797,7 +794,7 @@ class AppTests(unittest.TestCase):
         api = FakeOeffentlich(self.data["testtage"], leer, self.data["snapshots"])
         with mock.patch.object(q, "https_transport", api):
             at = self.app(TT_SLUG)
-            self.assertIn("<div class='tt-leer'>Es sind noch keine Live-Resultate veröffentlicht.</div>", self.roh(at))
+            self.assertIn("<div class='tt-leer'>Noch keine Resultate.</div>", self.roh(at))
             self.assert_clean(at)
 
     # ── Darstellung: Texte werden nie als HTML oder Markdown ausgeführt ──

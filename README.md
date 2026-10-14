@@ -600,8 +600,12 @@ Einzelpfade; beides zugleich wird abgewiesen). Gilt für Publisher, `--check` un
 
 Neben Programm und AK lässt sich Live auf ein Gerät einschränken (Standard „Alle“). Angeboten werden die Geräte mit
 veröffentlichten Resultaten der Auswahl, in der Stationsfolge der Startliste; Kraft (ohne Station) am Schluss. Die
-Wahl steht in der Adresse (`&g=`) und gilt auch in „Gerät“. Die Statuszeile lautet „Live – wird laufend
-aktualisiert“.
+Wahl steht in der Adresse (`&g=`) und gilt auch in „Gerät“.
+
+**Texte:** bewusst kurz und ohne Symbole (Pillen „Live · Gerät · Ranglisten · Startliste · Zeitplan“, Status „Live“ /
+„Demnächst“ / „Archiv“, „Stand 15:32“, leere Zustände wie „Noch keine Resultate.“, Fusszeile „Turnsport Aargau ·
+Testtag“); statische Seite und Streamlit gleich. Hinweis des Publishers zur Freigabe: „Stand nach Rotation 2 von 8“
+bzw. „Alle Rotationen“.
 
 ## Ansicht „Gerät“
 

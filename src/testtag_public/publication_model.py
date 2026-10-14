@@ -1080,9 +1080,8 @@ def _row(bereich: str, programm: str, ak: str, art: str, gruppen: list, hinweis:
 
 def _rotation_hint(program: dict) -> str:
     if program["rotation_freigegeben"] >= program["rotationen"]:
-        return "Alle Rotationen freigegeben."
-    return (f"Zwischenstand: Resultate bis Rotation {program['rotation_freigegeben']} von "
-            f"{program['rotationen']} freigegeben.")
+        return "Alle Rotationen"
+    return f"Stand nach Rotation {program['rotation_freigegeben']} von {program['rotationen']}"
 
 
 def publication_rows(state: dict) -> list[dict]:

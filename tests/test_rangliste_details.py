@@ -185,7 +185,7 @@ class RanglisteDetails(unittest.TestCase):
         falsch = dict(e, technik=99)
         self.assertIsNone(q.turner_details(falsch, eigene, None, eigene))
         karte = klartext(app.rang_karte(falsch, "gesamt", eigene, None))
-        self.assertIn("Die Aufschlüsselung ist zurzeit nicht verfügbar.", karte)
+        self.assertIn("Details nicht verfügbar.", karte)
 
     def test_older_publication_without_structure_falls_back_to_published_results(self):
         e, eigene, _d = self.person(AK5, "AK 7", "Lea")

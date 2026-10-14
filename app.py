@@ -59,15 +59,15 @@ ALLE = "Alle"
 MAX_LIVE = 300
 LOGO = Path(__file__).resolve().parent / "assets" / "turnsport_aargau_logo.png"
 ROBOTS = '<meta name="robots" content="noindex, nofollow">'
-NICHT_VERFUEGBAR = "Die Daten dieses Testtags sind zurzeit nicht verfügbar. Bitte später erneut versuchen."
-VERALTET = "Aktualisierung vorübergehend nicht möglich – letzter gültiger Stand wird angezeigt"
+NICHT_VERFUEGBAR = "Daten zurzeit nicht erreichbar, neuer Versuch läuft."
+VERALTET = "Verbindung unterbrochen, angezeigt wird der Stand von"
 WARTET = "Die Daten sind zurzeit nicht erreichbar. Die Seite versucht es automatisch erneut."
 ANSICHT_PARAM = {q.LIVE: "live", q.RANGLISTE: "rangliste", q.STARTLISTE: "startliste", q.ZEITPLAN: "zeitplan"}
 PARAM_ANSICHT = {wert: bereich for bereich, wert in ANSICHT_PARAM.items()}
 GERAET = "geraet"  # Ansicht „Gerät“: nur auf der statischen Seite (folgt deren Ranglisten), kein Bereich hier
-NAV_TEXT = {q.LIVE: "⚡ Live", GERAET: "🤸 Gerät", q.RANGLISTE: "🏅 Ranglisten", q.STARTLISTE: "📋 Startliste",
-            q.ZEITPLAN: "🕐 Zeitplan"}
-STATUS_BADGE = {"live": ("live", "LIVE"), "vorbereitet": ("demnaechst", "Demnächst"), "archiviert": ("archiv", "Archiv")}
+NAV_TEXT = {q.LIVE: "Live", GERAET: "Gerät", q.RANGLISTE: "Ranglisten", q.STARTLISTE: "Startliste",
+            q.ZEITPLAN: "Zeitplan"}
+STATUS_BADGE = {"live": ("live", "Live"), "vorbereitet": ("demnaechst", "Demnächst"), "archiviert": ("archiv", "Archiv")}
 RANG_FARBE = {1: "#FFD700", 2: "#C0C0C0", 3: "#CD7F32"}
 
 # ── Zentrale Gestaltung (Farben, Typografie, Abstände wie die AMM-Anzeige) ───────────────────────────────
@@ -263,8 +263,7 @@ def leer(text: str) -> None:
 
 
 def fuss() -> None:
-    _html(["<div class='tt-fuss'>Öffentliche Ansicht – nur lesend. Noch nicht freigegebene Rotationen sind nicht "
-           "enthalten.<br>Turnsport Aargau · Testtag</div>"])
+    _html(["<div class='tt-fuss'>Turnsport Aargau · Testtag</div>"])
 
 
 def _warten(versuch) -> None:
@@ -336,7 +335,7 @@ def statische_links(testtag) -> dict[str, str]:
     return links
 
 
-def _live_pille(link: str, text: str = "⚡ Live") -> str:
+def _live_pille(link: str, text: str = "Live") -> str:
     return f"<a class='tt-pille' href='{_h(link)}' target='_self'>{_h(text)}</a>"
 
 
@@ -354,8 +353,7 @@ def _bereich_aus_adresse(bereiche: list[str]) -> None:
         st.session_state.pop("bereich", None)
 
 
-ROTATION_HINWEIS = ("«Gerät» ist in dieser Ansicht nicht verfügbar. Angezeigt wird die Technik-Rangliste; "
-                    "unter «Rangliste» lässt sich die Ebene wechseln.")
+ROTATION_HINWEIS = "«Gerät» gibt es hier nicht, angezeigt wird die Technik-Rangliste."
 
 
 def _rangliste_aus_adresse(bereiche: list[str]) -> None:
@@ -390,14 +388,14 @@ def _ansicht_merken() -> None:
 # ── Übersicht ────────────────────────────────────────────────────────────────────────────────────────
 
 def uebersicht(zugang) -> None:
-    kopfband("Testtage", "Turnsport Aargau · Live-Resultate, Ranglisten, Startlisten")
+    kopfband("Testtage")
     try:
         testtage = q.lade_testtage(zugang)
     except q.QuellenFehler:
         st.fragment(run_every=TAKT)(_warten)(lambda: q.lade_testtage(zugang))
         return
     if not testtage:
-        leer("Zurzeit ist kein Testtag veröffentlicht.")
+        leer("Zurzeit kein Testtag.")
         return
     for status, ueberschrift in (("live", "Live"), ("vorbereitet", "Demnächst"), ("archiviert", "Archiv")):
         gruppe = [t for t in testtage if t.status == status]
@@ -410,7 +408,7 @@ def uebersicht(zugang) -> None:
             link = statische_links(testtag).get(q.LIVE)
             _html([f"<div class='tt-meta'>{_badge(status)} &nbsp;Stand "
                    f"{_h(q.zeit_text(testtag.stand_am, mit_datum=True))} · Adresse ?t={_h(testtag.slug)}"
-                   f"{_live_pille(link, '⚡ Live-Resultate') if link else ''}</div>"])
+                   f"{_live_pille(link, 'Live-Resultate') if link else ''}</div>"])
 
 
 # ── Laden mit letztem gültigem Stand ────────────────────────────────────────────────────────────────
@@ -499,22 +497,26 @@ def aktualisieren(zugang, testtag) -> bool:
     return True
 
 
-def status_text(status: str) -> tuple[str, str]:
-    if status == "live":
-        return "Live", "wird laufend aktualisiert"
-    if status == "archiviert":
-        return "Archiv", "abgeschlossener Testtag, keine Aktualisierung"
-    return "Vorbereitet", "noch nicht gestartet"
+def status_text(status: str) -> str:
+    return {"live": "Live", "archiviert": "Archiv"}.get(status, "Demnächst")
+
+
+def stand_text(text: str) -> str:
+    """„15:32“ für heute, sonst „13.10.2026 15:32“."""
+    try:
+        lokal = q.nach_zuerich(q.zeit(text))
+    except (ValueError, TypeError):
+        return ""
+    heute = q.nach_zuerich(datetime.now(timezone.utc)).date() == lokal.date()
+    return lokal.strftime("%H:%M" if heute else "%d.%m.%Y %H:%M")
 
 
 def _stand_zeile(testtag, stand, fehler) -> None:
     zeitpunkte = [d.stand_am for d in stand.saetze]
     veroeffentlicht = max(zeitpunkte, key=q.zeit) if zeitpunkte else testtag.stand_am
-    geprueft = st.session_state.get(f"geprueft|{testtag.id}") or stand.geladen_am
-    _html([f"<div class='tt-stand'>Datenstand {_h(q.zeit_text(veroeffentlicht, mit_datum=True))} · geprüft "
-           f"{q.nach_zuerich(max(geprueft, stand.geladen_am)).strftime('%H:%M:%S')}</div>"])
+    _html([f"<div class='tt-stand'>Stand {_h(stand_text(veroeffentlicht))}</div>"])
     if fehler:
-        st.warning(f"{VERALTET} (Stand {q.nach_zuerich(stand.geladen_am).strftime('%H:%M:%S')}).")
+        st.warning(f"{VERALTET} {stand_text(stand.geladen_am.isoformat())}.")
 
 
 def _auswahl(label: str, optionen: list, key: str, format_func=str):
@@ -546,7 +548,7 @@ def live_karte(nr: int, r: dict) -> str:
 def _live(stand) -> None:
     programme = q.programme(stand, q.LIVE)
     if not programme:
-        leer("Es sind noch keine Live-Resultate veröffentlicht.")
+        leer("Noch keine Resultate.")
         return
     spalten = st.columns(2)
     with spalten[0]:
@@ -557,14 +559,14 @@ def _live(stand) -> None:
         ak = _auswahl("Altersklasse", [ALLE, *aks], "live_ak")
     resultate = q.live_resultate(stand, None if programm == ALLE else programm, None if ak == ALLE else ak)
     if not resultate:
-        leer("Für diese Auswahl sind noch keine Resultate veröffentlicht.")
+        leer("Noch keine Resultate.")
         return
-    teile = [f"<div class='tt-anzahl'>{len(resultate)} Resultate – neueste Änderung zuerst</div>",
+    teile = [f"<div class='tt-anzahl'>{len(resultate)} Resultate, neueste zuerst</div>",
              "<div class='tt-liste tt-live'>"]
     teile += [live_karte(nr, r) for nr, r in enumerate(resultate[:MAX_LIVE], start=1)]
     teile.append("</div>")
     if len(resultate) > MAX_LIVE:
-        teile.append(f"<div class='tt-anzahl'>Die neuesten {MAX_LIVE} Resultate werden angezeigt.</div>")
+        teile.append(f"<div class='tt-anzahl'>Angezeigt: die neuesten {MAX_LIVE}.</div>")
     _html(teile)
 
 
@@ -645,7 +647,7 @@ def rang_karte(e: dict, art: str, eigene: list[dict], details: dict | None) -> s
                  "beweglichkeit": any(r.get("bereich") == "beweglichkeit" for r in eigene),
                  "kraft": any(r.get("bereich") == "kraft" for r in eigene), "gesamt": bool(eigene)}  # nie scheinbar 0
     if details is None:
-        inhalt = "<div class='tt-dhinweis'>Die Aufschlüsselung ist zurzeit nicht verfügbar.</div>"
+        inhalt = "<div class='tt-dhinweis'>Details nicht verfügbar.</div>"
     else:
         inhalt = DETAILS[art](e, details, vorhanden)
     return (f"<div class='tt-karte tt-rangkarte'><details><summary><div class='tt-karte-kopf'>"
@@ -661,7 +663,7 @@ def _ranglisten(stand) -> None:
         st.info(ROTATION_HINWEIS)
     programme = q.programme(stand, q.RANGLISTE)
     if not programme:
-        leer("Es ist noch keine Rangliste veröffentlicht.")
+        leer("Noch keine Rangliste.")
         return
     spalten = st.columns(2)
     with spalten[0]:
@@ -673,7 +675,7 @@ def _ranglisten(stand) -> None:
     hinweis = q.hinweis(stand, q.RANGLISTE, programm, ak)
     eintraege = q.rangliste(stand, programm, ak, art)
     if not eintraege:
-        leer("Für diese Auswahl ist noch keine Rangliste veröffentlicht.")
+        leer("Noch keine Rangliste.")
         return
     alle = q.live_resultate(stand, programm, ak)
     struktur = q.ranglisten_struktur(stand, programm, ak)
@@ -686,8 +688,7 @@ def _ranglisten(stand) -> None:
         karten.append(rang_karte(e, art, eigene, q.turner_details(e, eigene, struktur, alle)))
     teile = [f"<div class='tt-anzahl'>{_h(hinweis)}</div>" if hinweis else "", "<div class='tt-liste tt-rangliste'>"]
     teile += karten
-    teile.append("</div><div class='tt-anzahl'>– = noch kein veröffentlichtes Resultat. Gleiche Punktzahl ergibt "
-                 "den gleichen Rang. Turner antippen für Details; T = Linienpunkte.</div>")
+    teile.append("</div><div class='tt-anzahl'>– = noch keine Note</div>")
     _html(teile)
 
 
@@ -706,7 +707,7 @@ def startliste_tabelle(gruppe: dict) -> str:
 def _startliste(stand) -> None:
     listen = q.startlisten(stand)
     if not listen:
-        leer("Es ist noch keine Startliste veröffentlicht.")
+        leer("Noch keine Startliste.")
         return
     teile = []
     for programm, gruppen in listen:
@@ -718,7 +719,7 @@ def _startliste(stand) -> None:
 def _zeitplan(stand) -> None:
     bloecke = q.zeitplan(stand)
     if not bloecke:
-        leer("Es ist noch kein Zeitplan veröffentlicht.")
+        leer("Noch kein Zeitplan.")
         return
     teile = []
     for block in bloecke:  # Reihenfolge exakt vom Publisher
@@ -745,11 +746,8 @@ def navigation(bereiche: list[str], links: dict[str, str]):
                         label_visibility="collapsed", format_func=lambda b: NAV_TEXT[b], on_change=_ansicht_merken)
 
 
-VERWEIS_TEXT = {q.LIVE: ("Die Live-Resultate werden", "⚡ Live-Resultate öffnen"),
-                GERAET: ("Die Riegen je Gerät und Rotation werden", "🤸 Gerät öffnen"),
-                q.RANGLISTE: ("Die Ranglisten werden", "🏅 Ranglisten öffnen"),
-                q.STARTLISTE: ("Die Startliste wird", "📋 Startliste öffnen"),
-                q.ZEITPLAN: ("Der Zeitplan wird", "🕐 Zeitplan öffnen")}
+VERWEIS_TEXT = {q.LIVE: "Live-Resultate öffnen", GERAET: "Gerät öffnen", q.RANGLISTE: "Ranglisten öffnen",
+                q.STARTLISTE: "Startliste öffnen", q.ZEITPLAN: "Zeitplan öffnen"}
 
 
 def live_verweis(links: dict[str, str]) -> None:
@@ -757,10 +755,7 @@ def live_verweis(links: dict[str, str]) -> None:
     wert = str(st.query_params.get("ansicht", "") or "").strip()
     gewuenscht = GERAET if wert == GERAET else PARAM_ANSICHT.get(wert)
     bereich = gewuenscht if gewuenscht in links else q.LIVE
-    text, knopf = VERWEIS_TEXT[bereich]
-    link = links[bereich]
-    _html([f"<div class='tt-verweis'>{text} auf einer eigenen, schnellen Seite angezeigt.<br>",
-           _live_pille(link, knopf), "</div>"])
+    _html(["<div class='tt-verweis'>", _live_pille(links[bereich], VERWEIS_TEXT[bereich]), "</div>"])
 
 
 def testtag_ansicht(zugang, testtag, links: dict[str, str] | None = None) -> None:
@@ -784,7 +779,8 @@ def testtag_ansicht(zugang, testtag, links: dict[str, str] | None = None) -> Non
 
 
 def zeichne() -> None:
-    st.set_page_config(page_title="Testtag", page_icon="🏆", layout="centered", initial_sidebar_state="collapsed")
+    st.set_page_config(page_title="Testtag", page_icon=str(LOGO) if LOGO.exists() else None, layout="centered",
+                       initial_sidebar_state="collapsed")
     st.markdown(ROBOTS + STIL, unsafe_allow_html=True)
     zugang = _zugang()
     if zugang is None:
@@ -820,8 +816,7 @@ def zeichne() -> None:
         return
     if kennung != testtag.slug:  # alter UUID-Link: künftig immer mit dem Slug
         st.query_params["t"] = testtag.slug
-    titel, text = status_text(testtag.status)
-    kopfband(testtag.titel, badge=_badge(testtag.status, f"{titel} – {text}"))
+    kopfband(testtag.titel, badge=_badge(testtag.status, status_text(testtag.status)))
     links = statische_links(testtag)
     bereiche = _bereiche(links)
     _bereich_aus_adresse(bereiche)

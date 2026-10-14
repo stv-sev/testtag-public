@@ -34,8 +34,7 @@ from testtag_public import publication_model as pm  # noqa: E402
 
 TESTTAG_ID = "5e7a0c1d-0000-4000-8000-00000000a11e"
 SLUG = "systemtest-rangliste"
-FUSS = ("– = noch kein veröffentlichtes Resultat. Gleiche Punktzahl ergibt den gleichen Rang. Turner antippen für "
-        "Details; T = Linienpunkte.")
+FUSS = "– = noch keine Note"
 
 
 def klartext(fragment: str) -> str:
@@ -46,7 +45,7 @@ def erwartet(stand, programm, ak, art) -> str:
     """Inhalt wie app._ranglisten unterhalb der Auswahlfelder (Klartext)."""
     eintraege = q.rangliste(stand, programm, ak, art)
     if not eintraege:
-        return "Für diese Auswahl ist noch keine Rangliste veröffentlicht."
+        return "Noch keine Rangliste."
     hinweis = q.hinweis(stand, q.RANGLISTE, programm, ak)
     alle = q.live_resultate(stand, programm, ak)
     struktur = q.ranglisten_struktur(stand, programm, ak)
@@ -64,7 +63,7 @@ def erwartet_startliste(stand, programm) -> str:
     """Wie app._startliste; mit gewähltem Programm nur dessen Gruppen (Alle = Streamlit-Ansicht)."""
     listen = [(p, g) for p, g in q.startlisten(stand) if programm in ("Alle", p)]
     if not listen:
-        return "Es ist noch keine Startliste veröffentlicht."
+        return "Noch keine Startliste."
     teile = []
     for p, gruppen in listen:
         teile.append(f"<div>{app._h(app._programm(p))}</div>")
@@ -76,7 +75,7 @@ def erwartet_zeitplan(stand) -> str:
     """Wie app._zeitplan."""
     bloecke = q.zeitplan(stand)
     if not bloecke:
-        return "Es ist noch kein Zeitplan veröffentlicht."
+        return "Noch kein Zeitplan."
     teile = []
     for block in bloecke:
         teile.append(f"<div>{app._h(app._programm(block.get('programm', '')))}</div>")
