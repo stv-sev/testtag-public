@@ -58,6 +58,7 @@ KONTROLLE_SEKUNDEN = 300  # s: gemeinsame Kontrollladung eines unveränderten St
 ALLE = "Alle"
 MAX_LIVE = 300
 LOGO = Path(__file__).resolve().parent / "assets" / "turnsport_aargau_logo.png"
+ICON = Path(__file__).resolve().parent / "assets" / "turnsport_aargau_logo_A.png"
 ROBOTS = '<meta name="robots" content="noindex, nofollow">'
 NICHT_VERFUEGBAR = "Daten zurzeit nicht erreichbar, neuer Versuch läuft."
 VERALTET = "Verbindung unterbrochen, angezeigt wird der Stand von"
@@ -779,7 +780,7 @@ def testtag_ansicht(zugang, testtag, links: dict[str, str] | None = None) -> Non
 
 
 def zeichne() -> None:
-    st.set_page_config(page_title="Testtag", page_icon=str(LOGO) if LOGO.exists() else None, layout="centered",
+    st.set_page_config(page_title="Testtag", page_icon=str(ICON) if ICON.exists() else None, layout="centered",
                        initial_sidebar_state="collapsed")
     st.markdown(ROBOTS + STIL, unsafe_allow_html=True)
     zugang = _zugang()
