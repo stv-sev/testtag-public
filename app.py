@@ -11,7 +11,8 @@ Adressen:
 - `&ansicht=live|rangliste|startliste|zeitplan`: öffnet diesen Bereich (Links aus der statischen Live-Ansicht);
   ein Bereichswechsel schreibt ihn in die Adresse. Filter (Programm, AK) stehen bewusst nicht in der Adresse.
 - `&art=gesamt|technik|athletik` (Umleitung der statischen Seite): wählt einmal die Ranglistenebene;
-  `&sicht=rotation` ("Gerät & Rotation" gibt es nur statisch) zeigt einen Hinweis und die Technik-Rangliste.
+  `&sicht=rotation` bzw. `&ansicht=geraet` ("Gerät" gibt es nur statisch) zeigt einen Hinweis und die
+  Technik-Rangliste. Liegen die Ranglisten auf der statischen Seite, führt die Pille "Gerät" dorthin.
 
 Statische Live-Ansicht (optional, Secret `live_url`, z. B. `https://stv-sev.github.io/testtag-public/`): Ist sie
 hinterlegt, führt „← Alle Testtage“ auf deren Übersicht und „Live“ bei nicht archivierten Testtagen auf `live_url?t=<slug>`; Streamlit zeigt dann nur
@@ -63,7 +64,9 @@ VERALTET = "Aktualisierung vorübergehend nicht möglich – letzter gültiger S
 WARTET = "Die Daten sind zurzeit nicht erreichbar. Die Seite versucht es automatisch erneut."
 ANSICHT_PARAM = {q.LIVE: "live", q.RANGLISTE: "rangliste", q.STARTLISTE: "startliste", q.ZEITPLAN: "zeitplan"}
 PARAM_ANSICHT = {wert: bereich for bereich, wert in ANSICHT_PARAM.items()}
-NAV_TEXT = {q.LIVE: "⚡ Live", q.RANGLISTE: "🏅 Ranglisten", q.STARTLISTE: "📋 Startliste", q.ZEITPLAN: "🕐 Zeitplan"}
+GERAET = "geraet"  # Ansicht „Gerät“: nur auf der statischen Seite (folgt deren Ranglisten), kein Bereich hier
+NAV_TEXT = {q.LIVE: "⚡ Live", GERAET: "🤸 Gerät", q.RANGLISTE: "🏅 Ranglisten", q.STARTLISTE: "📋 Startliste",
+            q.ZEITPLAN: "🕐 Zeitplan"}
 STATUS_BADGE = {"live": ("live", "LIVE"), "vorbereitet": ("demnaechst", "Demnächst"), "archiviert": ("archiv", "Archiv")}
 RANG_FARBE = {1: "#FFD700", 2: "#C0C0C0", 3: "#CD7F32"}
 
@@ -325,8 +328,12 @@ def statische_links(testtag) -> dict[str, str]:
         gewaehlt = {str(b) for b in liste} if isinstance(liste, (list, tuple)) else set()
     except Exception:
         gewaehlt = set()
-    return {q.LIVE: link, **{b: f"{link}&ansicht={ANSICHT_PARAM[b]}" for b in q.BEREICHE
-                              if b != q.LIVE and ANSICHT_PARAM[b] in gewaehlt}}
+    links = {q.LIVE: link}
+    if ANSICHT_PARAM[q.RANGLISTE] in gewaehlt:  # Reihenfolge wie die statische Seite: Live · Gerät · Ranglisten …
+        links[GERAET] = f"{link}&ansicht={GERAET}"
+    links.update({b: f"{link}&ansicht={ANSICHT_PARAM[b]}" for b in q.BEREICHE
+                  if b != q.LIVE and ANSICHT_PARAM[b] in gewaehlt})
+    return links
 
 
 def _live_pille(link: str, text: str = "⚡ Live") -> str:
@@ -339,29 +346,34 @@ def _bereiche(links: dict[str, str]) -> list[str]:
 
 def _bereich_aus_adresse(bereiche: list[str]) -> None:
     """`&ansicht=` wählt den Bereich; ein unbekannter Wert (oder Live bei statischer Live-Ansicht) wählt keinen."""
-    gewuenscht = PARAM_ANSICHT.get(str(st.query_params.get("ansicht", "") or "").strip())
+    wert = str(st.query_params.get("ansicht", "") or "").strip()
+    gewuenscht = q.RANGLISTE if wert == GERAET else PARAM_ANSICHT.get(wert)  # „Gerät“ hier: Technik-Rangliste
     if gewuenscht in bereiche:
         st.session_state["bereich"] = gewuenscht
     elif "ansicht" in st.query_params or st.session_state.get("bereich") not in bereiche:
         st.session_state.pop("bereich", None)
 
 
-ROTATION_HINWEIS = ("«Gerät & Rotation» ist in dieser Ansicht nicht verfügbar. Angezeigt wird die Technik-Rangliste; "
+ROTATION_HINWEIS = ("«Gerät» ist in dieser Ansicht nicht verfügbar. Angezeigt wird die Technik-Rangliste; "
                     "unter «Rangliste» lässt sich die Ebene wechseln.")
 
 
 def _rangliste_aus_adresse(bereiche: list[str]) -> None:
-    """`&art=` (Umleitung der statischen Seite) wählt die Ebene einmal; `&sicht=rotation` gibt es hier nicht: Technik
-    mit Hinweis. Die Angaben werden danach aus der Adresse entfernt, damit die Ebene frei wählbar bleibt."""
-    if q.RANGLISTE not in bereiche or not any(k in st.query_params for k in ("art", "sicht", "g", "r")):
+    """`&art=` (Umleitung der statischen Seite) wählt die Ebene einmal; „Gerät“ (`&sicht=rotation` oder
+    `&ansicht=geraet`) gibt es hier nicht: Technik mit Hinweis. Die Angaben werden danach aus der Adresse entfernt,
+    damit die Ebene frei wählbar bleibt."""
+    geraet = str(st.query_params.get("ansicht", "") or "").strip() == GERAET
+    if q.RANGLISTE not in bereiche or not (geraet or any(k in st.query_params for k in ("art", "sicht", "g", "r"))):
         return
-    art = str(st.query_params.get("art", "") or "").strip()
-    rotation = art == "technik" and str(st.query_params.get("sicht", "") or "").strip() == "rotation"
+    art = "technik" if geraet else str(st.query_params.get("art", "") or "").strip()
+    rotation = geraet or (art == "technik" and str(st.query_params.get("sicht", "") or "").strip() == "rotation")
     if art in q.RANGLISTEN:
         st.session_state["rl_art"] = art
     st.session_state["rl_rotation"] = rotation
     for k in ("art", "sicht", "g", "r"):
         st.query_params.pop(k, None)
+    if geraet:
+        st.query_params["ansicht"] = ANSICHT_PARAM[q.RANGLISTE]
 
 
 def _rotation_vergessen() -> None:
@@ -734,6 +746,7 @@ def navigation(bereiche: list[str], links: dict[str, str]):
 
 
 VERWEIS_TEXT = {q.LIVE: ("Die Live-Resultate werden", "⚡ Live-Resultate öffnen"),
+                GERAET: ("Die Riegen je Gerät und Rotation werden", "🤸 Gerät öffnen"),
                 q.RANGLISTE: ("Die Ranglisten werden", "🏅 Ranglisten öffnen"),
                 q.STARTLISTE: ("Die Startliste wird", "📋 Startliste öffnen"),
                 q.ZEITPLAN: ("Der Zeitplan wird", "🕐 Zeitplan öffnen")}
@@ -741,7 +754,8 @@ VERWEIS_TEXT = {q.LIVE: ("Die Live-Resultate werden", "⚡ Live-Resultate öffne
 
 def live_verweis(links: dict[str, str]) -> None:
     """Bereich liegt auf der statischen Seite: kein Datenabruf, keine Personendaten, nur der Weg dorthin."""
-    gewuenscht = PARAM_ANSICHT.get(str(st.query_params.get("ansicht", "") or "").strip())
+    wert = str(st.query_params.get("ansicht", "") or "").strip()
+    gewuenscht = GERAET if wert == GERAET else PARAM_ANSICHT.get(wert)
     bereich = gewuenscht if gewuenscht in links else q.LIVE
     text, knopf = VERWEIS_TEXT[bereich]
     link = links[bereich]

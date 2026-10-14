@@ -139,7 +139,8 @@ const gezeichnet = {};
   await bereit(page);
   pruefe(await page.$eval("[data-ansicht=rangliste]", (a) => a.getAttribute("href")).then((h) => h.includes("ansicht=rangliste")
     && h.includes("ak=AK+7")), "Live: Pille Ranglisten verweist auf diese Seite mit Auswahl");
-  pruefe(await page.locator("[data-ziel]").count() === 0, "Live: alle vier Pillen auf dieser Seite");
+  pruefe(await page.locator("[data-ziel]").count() === 0 && await page.locator("[data-ansicht]").count() === 5,
+    "Live: alle fünf Pillen auf dieser Seite");
   await page.evaluate(() => { window.__ohneNeuladen = true; });
   const vorWechsel = sb.anfragen.length;
   const t0 = Date.now();
@@ -248,7 +249,7 @@ const gezeichnet = {};
   await ctx.close();
 }
 
-// ── 1d. Technik „Gerät & Rotation“ und gestufte Gesamtdetails ─────────────────────────────────────────────
+// ── 1d. Ansicht „Gerät“ und gestufte Gesamtdetails ────────────────────────────────────────────────────────
 {
   const { ctx, page } = await kontext({ width: 390, height: 844 }, true);
   sb.stand = staende.r8; sb.status = "live"; sb.sichtbar = true; sb.netz = true;
@@ -277,8 +278,12 @@ const gezeichnet = {};
   await page.screenshot({ path: `${bilder}/mobil-gesamt-gestuft.png`, fullPage: true });
 
   sb.stand = staende.r2;
-  // Gerät & Rotation: Rotation 5 per Adresse bei Freigabe 2 → verworfen, nichts angezeigt
-  await page.goto(adresse("&ansicht=rangliste&p=AK5-AK9%2B&art=technik&sicht=rotation&g=Boden&r=5"));
+  // Pillen: Live · Gerät · Ranglisten · Startliste · Zeitplan
+  const pillen = (await page.locator("#nav .tt-pille").allTextContents()).map((t) => t.trim());
+  pruefe(JSON.stringify(pillen) === JSON.stringify(["⚡ Live", "🤸 Gerät", "🏅 Ranglisten", "📋 Startliste", "🕐 Zeitplan"]),
+    `Pillen in der Reihenfolge Live · Gerät · Ranglisten · Startliste · Zeitplan (${pillen.join(" · ")})`);
+  // Gerät: Rotation 5 per Adresse bei Freigabe 2 → verworfen, nichts angezeigt
+  await page.goto(adresse("&ansicht=geraet&p=AK5-AK9%2B&g=Boden&r=5"));
   await bereit(page);
   pruefe(!params().has("r") && await page.inputValue("#rotation") === ""
     && JSON.stringify(await rotationen()) === JSON.stringify(["bitte wählen", "Rotation 1", "Rotation 2"]),
@@ -287,10 +292,12 @@ const gezeichnet = {};
   pruefe(JSON.stringify(await page.locator("#geraet option").allTextContents())
     === JSON.stringify(["Boden", "Pferd", "Ringe", "Sprung", "Barren", "Trampolin", "Reck"]), "Geräte: Technikstationen in Stationsfolge");
   pruefe((await page.textContent("#hinweise")).includes("Resultate bis Rotation 2 von 8 freigegeben."), "Hinweis Freigabe (keine laufende Rotation)");
-  pruefe(await page.locator("#sichten").isVisible() && await page.inputValue("#ak") === "Alle", "Umschalter sichtbar, AK optional (Alle)");
+  pruefe(await page.locator("[data-ansicht=geraet].aktiv").count() === 1 && await page.locator("#arten").isHidden()
+    && await page.inputValue("#ak") === "Alle", "Pille Gerät aktiv, keine Ranglistenebenen, AK optional (Alle)");
   await page.selectOption("#rotation", "1");
   await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Riege Startgerät"));
-  pruefe(params().get("r") === "1" && params().get("g") === "Boden" && params().get("sicht") === "rotation", `Adresse ${new URL(page.url()).search}`);
+  pruefe(params().get("r") === "1" && params().get("g") === "Boden" && params().get("ansicht") === "geraet"
+    && !params().has("art") && !params().has("sicht"), `Adresse ${new URL(page.url()).search}`);
   pruefe((await text()).startsWith("Rotation 1 · Boden · Riege Startgerät Boden") && await page.locator("#inhalt .tt-rangkarte").count() === 1
     && await page.locator("#inhalt .tt-rang").count() === 0, "Boden, Rotation 1: Riege Boden, ohne Rang");
   await page.locator(".tt-rangkarte summary").first().click();
@@ -313,10 +320,10 @@ const gezeichnet = {};
   await page.selectOption("#geraet", "Reck");
   await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("keine Riege eingeteilt"));
   pruefe(true, "Reck, Rotation 2: keine Riege (Startgerät Trampolin leer)");
-  pruefe(await breite(page), "Smartphone: Gerät & Rotation ohne waagrechte Scrollbar");
+  pruefe(await breite(page), "Smartphone: Gerät ohne waagrechte Scrollbar");
   // Freigabe sinkt: Rotation 8 gewählt, neue Publikation mit Freigabe 2 → Auswahl verworfen
   sb.stand = staende.r8;
-  await page.goto(adresse("&ansicht=rangliste&p=AK5-AK9%2B&art=technik&sicht=rotation&g=Boden&r=8"));
+  await page.goto(adresse("&ansicht=geraet&p=AK5-AK9%2B&g=Boden&r=8"));
   await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Rotation 8 · Boden · Riege Startgerät Pferd"));
   pruefe((await rotationen()).length === 9, "Freigabe 8: Rotation 1–8 wählbar");
   await page.screenshot({ path: `${bilder}/mobil-geraet-rotation.png`, fullPage: true });
@@ -326,34 +333,35 @@ const gezeichnet = {};
   pruefe(!params().has("r") && !(await text()).includes("Max"), "Freigabe sinkt 8 → 2: Rotation 8 verworfen (auch aus der Adresse)");
   // Freigabe 0 und ältere Publikation ohne Einteilung
   sb.stand = staende.r0;
-  await page.goto(adresse("&ansicht=rangliste&p=AK5-AK9%2B&art=technik&sicht=rotation&r=1"));
+  await page.goto(adresse("&ansicht=geraet&p=AK5-AK9%2B&r=1"));
   await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("noch keine Rotation freigegeben"));
   pruefe(await page.isDisabled("#rotation") && !params().has("r") && !(await text()).includes("Lea"), "Freigabe 0: keine Rotation wählbar");
   sb.stand = staende.ohne_struktur;
-  await page.goto(adresse("&ansicht=rangliste&p=AK5-AK9%2B&art=technik&sicht=rotation&r=1"));
-  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("nicht verfügbar"));
+  await page.goto(adresse("&ansicht=geraet&p=AK5-AK9%2B&r=1"));
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("mit der nächsten Publikation verfügbar"));
   pruefe(!(await text()).includes("Lea"), "ältere Publikation ohne Einteilung: Hinweis statt geratener Einteilung");
   // Korrektur während der Anzeige: offene Karte bleibt offen
   sb.stand = staende.r8;
+  // frühere Adresse „Gerät & Rotation“ öffnet „Gerät“ und wird still umgeschrieben
   await page.goto(adresse("&ansicht=rangliste&p=AK5-AK9%2B&art=technik&sicht=rotation&g=Boden&r=1"));
   await page.waitForSelector("#inhalt .tt-rangkarte");
+  pruefe(params().get("ansicht") === "geraet" && !params().has("art") && !params().has("sicht") && params().get("r") === "1",
+    `frühere Adresse → ${new URL(page.url()).search}`);
   await page.locator(".tt-rangkarte summary").first().click();
   sb.stand = staende.korrektur;
   await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("T 9"), null, { timeout: 15000 });
   pruefe(await page.locator("#inhalt details[open]").count() === 1, "Korrektur sichtbar, geöffnete Karte bleibt offen");
-  // Umschalten Rangliste ⇄ Gerät & Rotation, Wechsel zu Live ohne Rotationsparameter
-  await page.click("[data-sicht=rangliste]");
+  // Wechsel Gerät ⇄ Ranglisten über die Pillen, Wechsel zu Live ohne Rotationsparameter
+  await page.click("[data-ansicht=rangliste]");
   await page.waitForSelector(".tt-rangliste .tt-rang");
-  pruefe(!params().has("sicht") && !params().has("r") && await page.locator("#filter2").isHidden(), "zurück zur Technik-Rangliste");
-  await page.click("[data-art=gesamt]");
-  pruefe(await page.locator("#sichten").isHidden(), "Umschalter nur bei Technik");
-  await page.click("[data-art=technik]");
+  pruefe(params().get("ansicht") === "rangliste" && !params().has("r") && await page.locator("#filter2").isHidden()
+    && await page.locator("#arten").isVisible(), "Ranglisten: Ebenen statt Gerät/Rotation");
   const vor = sb.anfragen.length;
-  await page.click("[data-sicht=rotation]");
+  await page.click("[data-ansicht=geraet]");
   await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Riege Startgerät"));
   const neu = sb.anfragen.slice(vor);
   pruefe(neu.length <= 1 && neu.every((a) => a.teil === "zeilen"), `Wechsel lädt höchstens eine Anfrage (${neu.map((a) => `${a.teil}:${a.bereich}`).join(",")})`);
-  pruefe(params().get("r") === "1", "gewählte Rotation bleibt beim Umschalten erhalten");
+  pruefe(params().get("r") === "1" && params().get("ansicht") === "geraet", "gewählte Rotation bleibt beim Wechsel erhalten");
   await page.click("[data-ansicht=live]");
   await page.waitForSelector(".tt-liste .tt-karte");
   pruefe(["art", "sicht", "g", "r"].every((k) => !params().has(k)) && await page.locator("#filter2").isHidden(), "Live: ohne Rotationsauswahl");
@@ -507,12 +515,13 @@ for (const ansicht of ["startliste", "zeitplan"]) {  // Archiv: Link ins Streaml
   await page.goto(adresse());
   await page.waitForSelector(".tt-karte");
   pruefe(await page.getAttribute("nav a:has-text('Ranglisten')", "href") === `${STREAMLIT}/?t=${SLUG}&ansicht=rangliste`,
-    "rangliste:false – Pille führt in Streamlit-Rangliste");
+    "Ranglisten nicht in ansichten – Pille führt in Streamlit-Rangliste");
+  pruefe(await page.locator("nav a:has-text('Gerät')").count() === 0, "Ranglisten nicht in ansichten – keine Pille Gerät");
   const vor = sb.anfragen.length;
   await page.goto(adresse("&ansicht=rangliste"));
   await page.waitForURL((x) => x.href.startsWith(STREAMLIT));
   pruefe(page.url() === `${STREAMLIT}/?t=${SLUG}&ansicht=rangliste` && sb.anfragen.length === vor,
-    "rangliste:false – &ansicht=rangliste leitet ohne Datenabruf nach Streamlit");
+    "Ranglisten nicht in ansichten – &ansicht=rangliste leitet ohne Datenabruf nach Streamlit");
   await ctx.close();
 }
 for (const [extra, ziel] of [["&ansicht=rangliste&ak=AK+7", "rangliste"], ["&ansicht=startliste&p=AK9-AK12", "startliste"],
@@ -524,8 +533,10 @@ for (const [extra, ziel] of [["&ansicht=rangliste&ak=AK+7", "rangliste"], ["&ans
   pruefe(page.url() === `${STREAMLIT}/?t=${SLUG}&ansicht=${ziel}` && sb.anfragen.length === vor, `Rückfall → Streamlit ${ziel} ohne Datenabruf`);
   await ctx.close();
 }
-// Rückfall aus „Gerät & Rotation“: Streamlit erhält Technik + sicht=rotation (dort Hinweis), Gerät/Rotation entfallen
+// Rückfall aus „Gerät“: Streamlit erhält Technik + sicht=rotation (dort Hinweis), Gerät/Rotation entfallen
 for (const [extra, zusatz, config] of [
+  ["&ansicht=geraet&p=AK5-AK9%2B&g=Boden&r=2", "&art=technik&sicht=rotation", { rueckfall: true, ansichten: ["rangliste", "startliste", "zeitplan"] }],
+  ["&ansicht=geraet&g=Boden&r=2", "&art=technik&sicht=rotation", { rueckfall: false, ansichten: ["startliste", "zeitplan"] }],
   ["&ansicht=rangliste&p=AK5-AK9%2B&art=technik&sicht=rotation&g=Boden&r=2", "&art=technik&sicht=rotation", { rueckfall: true, ansichten: ["rangliste", "startliste", "zeitplan"] }],
   ["&ansicht=rangliste&art=technik&sicht=rotation&g=Boden&r=2", "&art=technik&sicht=rotation", { rueckfall: false, ansichten: ["startliste", "zeitplan"] }],
   ["&ansicht=rangliste&art=athletik&sicht=rotation", "&art=athletik", { rueckfall: true, ansichten: ["rangliste"] }],

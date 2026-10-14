@@ -40,6 +40,8 @@ ATHLETIK_STATION = "Beweglichkeit"
 SPRUNG = "Sprung"
 
 QUELLE_STATION = "station"
+# Einteilungscodes im Blatt Startliste (`@ID°Rotation çGerät ^Startposition`); die Zeichen stehen in der Legende.
+EINTEILUNG_FELDER = ("id_athlete", "id_rotation", "id_apparatus", "id_position")
 QUELLE_DIREKT = "direkt"
 
 STATUS_GEWERTET = "gewertet"
@@ -87,6 +89,7 @@ class Code:
     ENDWERT_INKONSISTENT = "ENDWERT_INKONSISTENT"
     WERT_UNGUELTIG = "WERT_UNGUELTIG"
     STRUKTUR_UNGUELTIG = "STRUKTUR_UNGUELTIG"
+    EINTEILUNG_UNGUELTIG = "EINTEILUNG_UNGUELTIG"
 
 
 @dataclass(frozen=True)
@@ -174,6 +177,7 @@ class StartlistEntry:
     position: Any
     excel_id: int
     row: int
+    codes: tuple = ()  # je Rotationsspalte (Rotation laut Kopf, Gerät laut Kopf, Codewert, Zelle)
 
 
 @dataclass(frozen=True)
@@ -224,6 +228,7 @@ class ProgramSource:
     direct_fields: list[DirectField]
     onsite_blocks: list[OnsiteBlock]
     technik_blocks: list[tuple[str, int, str]] = field(default_factory=list)  # (Gerät, Linie, Spalte)
+    einteilung_zeichen: Optional[dict] = None  # Legende der Einteilungscodes im Blatt Startliste
 
 
 # ── Normalisierung und öffentlicher Schlüssel ────────────────────────────────────────────────────────
@@ -325,6 +330,7 @@ class ProgramResult:
     participants: list[Participant]
     results: list[dict]  # sichtbare Einzelwertungen (öffentlich, ohne geaendert_am)
     diagnose: dict
+    einteilung: dict = field(default_factory=dict)  # (Rotation, Gerät) → [(Startposition, Excel-ID)]
 
 
 def validate_public(source: ProgramSource, issues: Issues) -> Optional[tuple[ProgramDefinition, int, bool, dict]]:
@@ -530,6 +536,64 @@ def _rotation(value: Any, definition: ProgramDefinition, where: str, issues: Iss
     return rotation
 
 
+def _validate_einteilung(src: ProgramSource, definition: ProgramDefinition, people: dict[int, Participant],
+                         issues: Issues) -> dict[tuple[int, str], list[tuple[int, int]]]:
+    """Einteilung je Rotation und Gerät aus den Codes der Startliste (nicht berechnet).
+
+    Jeder Code muss zur Zeile (ID) und zur Spalte (Rotation, Gerät; ç = Position in tab_startgeraet) passen; jede
+    Person steht in jeder Rotation und an jeder Station genau einmal; Startpositionen je Rotation und Gerät sind
+    eindeutig; die Rotation jeder Technikzeile der Noteneingabe (`id_rotation`) stimmt mit der Einteilung überein.
+    """
+    name = definition.name
+    zeichen = src.einteilung_zeichen or {}
+    if not all(zeichen.get(f) for f in EINTEILUNG_FELDER):
+        issues.add(Code.EINTEILUNG_UNGUELTIG, f"{name}: Startliste: Legende der Einteilungscodes "
+                                              f"(id_athlete … id_position) fehlt.")
+        return {}
+    muster = re.compile("^" + "".join(re.escape(zeichen[f]) + r"(\d+)" for f in EINTEILUNG_FELDER) + "$")
+    stationen = [s.name for s in src.stations]
+    index = {n: i for i, n in enumerate(stationen, start=1)}
+    riegen: dict[tuple[int, str], list[tuple[int, int]]] = defaultdict(list)
+    zuteilung: dict[tuple[int, int], str] = {}
+    for entry in src.startliste:
+        if entry.excel_id not in people:
+            continue  # bereits gemeldet
+        rotationen, geraete = [], []
+        for rotation, geraet, wert, zelle in entry.codes:
+            treffer = muster.match(clean_text(wert))
+            if treffer is None:
+                issues.add(Code.EINTEILUNG_UNGUELTIG, f"{name}: {zelle}: Einteilungscode fehlt oder ist ungültig.")
+                continue
+            code_id, rot, ger, pos = map(int, treffer.groups())
+            if code_id != entry.excel_id or rot != _integer(rotation) or ger != index.get(geraet) or pos < 1:
+                issues.add(Code.EINTEILUNG_UNGUELTIG, f"{name}: {zelle}: Einteilungscode passt nicht zu ID, Rotation "
+                                                      f"oder Gerät der Spalte.")
+                continue
+            rotationen.append(rot)
+            geraete.append(geraet)
+            zuteilung[(entry.excel_id, rot)] = geraet
+            riegen[(rot, geraet)].append((pos, entry.excel_id))
+        if sorted(rotationen) != list(range(1, definition.rotationen + 1)) or sorted(geraete) != sorted(stationen):
+            issues.add(Code.EINTEILUNG_UNGUELTIG, f"{name}: Startliste Zeile {entry.row}: Einteilung enthält nicht "
+                                                  f"jede Rotation und jede Station genau einmal.")
+    for (rot, geraet), liste in sorted(riegen.items()):
+        positionen = [pos for pos, _i in liste]
+        if len(set(positionen)) != len(positionen):
+            issues.add(Code.EINTEILUNG_UNGUELTIG, f"{name}: Startliste: Startposition in Rotation {rot} an {geraet} "
+                                                  f"doppelt.")
+    gemeldet = set()
+    for slot in src.slots:
+        rot = _integer(slot.rotation)
+        if slot.bereich != BEREICH_TECHNIK or slot.quelle != QUELLE_STATION or rot is None:
+            continue
+        geraet = zuteilung.get((slot.excel_id, rot))
+        if geraet is not None and geraet != slot.geraet and (slot.excel_id, slot.geraet) not in gemeldet:
+            gemeldet.add((slot.excel_id, slot.geraet))
+            issues.add(Code.EINTEILUNG_UNGUELTIG, f"{name}: {slot.zelle}: Rotation laut Noteneingabe passt nicht zur "
+                                                  f"Einteilung der Startliste.")
+    return dict(riegen)
+
+
 def evaluate_program(src: ProgramSource, slug: str, issues: Issues) -> Optional[ProgramResult]:
     checked = validate_public(src, issues)
     if checked is None:
@@ -537,6 +601,7 @@ def evaluate_program(src: ProgramSource, slug: str, issues: Issues) -> Optional[
     definition, rotation_max, active, modes = checked
     _validate_structure(src, definition, issues)
     people = _validate_participants(src, definition, slug, issues)
+    einteilung = _validate_einteilung(src, definition, people, issues)
     lines = _line_map(src)
     codes = {s.name: s.geraet_code for s in src.stations}
     prog = definition.name
@@ -689,7 +754,7 @@ def evaluate_program(src: ProgramSource, slug: str, issues: Issues) -> Optional[
     if definition.sprung_regel:
         diagnose["sprung"] = {"ak9_quellen": dict(sorted(diag["sprung_ak9"].items())),
                               "ak10_12_ohne_alternative": diag["sprung_ohne_alternative"]}
-    return ProgramResult(definition, src, rotation_max, active, modes, participants, results, diagnose)
+    return ProgramResult(definition, src, rotation_max, active, modes, participants, results, diagnose, einteilung)
 
 
 def _noten_row(src: ProgramSource, excel_id: int) -> str:
@@ -852,12 +917,13 @@ def build_state(sources: list[ProgramSource], *, observed_at: datetime | str,
 
     previous_results = (previous or {}).get("einzelwertungen")
     current = [r for p in programs if p.active for r in p.results]
-    zeitplan, startlisten, ranglisten = [], {}, {}
+    zeitplan, startlisten, einteilungen, ranglisten = [], {}, {}, {}
     for p in programs:
         if not p.active:
             continue
         zeitplan.append({"programm": p.definition.name, "zeilen": p.source.zeitplan})
         startlisten[p.definition.name] = _startliste(p)
+        einteilungen[p.definition.name] = _einteilung(p)
         ranglisten[p.definition.name] = build_rankings(p)
     return {
         "schema_version": SCHEMA_VERSION,
@@ -870,27 +936,29 @@ def build_state(sources: list[ProgramSource], *, observed_at: datetime | str,
             "rotation_freigegeben": p.rotation_max,
             "kraftmodus": p.modes[BEREICH_KRAFT],
             "beweglichkeitsmodus": p.modes[BEREICH_BEWEGLICHKEIT],
-            "stationsfolge": _stationsfolge(p),
             "quelle": {"datei": p.source.source.filename, "sha256": p.source.source.sha256,
                        "bytes": p.source.source.size_bytes},
         } for p in programs],
         "zeitplan": zeitplan,
         "startlisten": startlisten,
+        "einteilungen": einteilungen,
         "einzelwertungen": merge_live(previous_results, current, observed_at),
         "ranglisten": ranglisten,
         "diagnose": {p.definition.name: p.diagnose for p in programs},
     }
 
 
-def _stationsfolge(program: ProgramResult) -> list[dict]:
-    """Stationen in der Reihenfolge von tab_startgeraet (= Rotationsfolge).
-
-    Eine Riege mit Startgerät an Position i steht in Rotation r an Station (i + r − 1) mod n. Das entspricht
-    `id_rotation` in `Noteneingabe` (am 14.10.2026 an allen vier Arbeitsmappen in 00-tool ohne Abweichung nachgeprüft).
-    """
-    athletik = set(ATHLETIK_GERAETECODE.values())
-    return [{"station": s.name, "bereich": "athletik" if s.geraet_code in athletik else BEREICH_TECHNIK}
-            for s in program.source.stations]
+def _einteilung(program: ProgramResult) -> dict:
+    """Ansicht „Gerät“: je Rotation und Technikgerät die Teilnehmerschlüssel in Startposition (aus der Startliste)."""
+    personen = {p.excel_id: p for p in program.participants}
+    geraete = [s.name for s in program.source.stations if s.name != ATHLETIK_STATION]
+    riegen = []
+    for rotation in range(1, program.definition.rotationen + 1):
+        for geraet in geraete:
+            liste = sorted((pos, personen[i].sort_key(), personen[i].key)
+                           for pos, i in program.einteilung.get((rotation, geraet), []) if i in personen)
+            riegen.append({"rotation": rotation, "geraet": geraet, "teilnehmer": [key for _p, _s, key in liste]})
+    return {"rotationen": program.definition.rotationen, "geraete": geraete, "riegen": riegen}
 
 
 def _startliste(program: ProgramResult) -> list[dict]:
@@ -918,14 +986,14 @@ def content_checksum(inhalt: dict) -> str:
 
 
 def _row(bereich: str, programm: str, ak: str, art: str, gruppen: list, hinweis: Optional[str] = None,
-         struktur: Optional[dict] = None, rotation: Optional[dict] = None) -> dict:
+         struktur: Optional[dict] = None, einteilung: Optional[dict] = None) -> dict:
     inhalt = {"schema_version": SCHEMA_VERSION, "art": art, "gruppen": gruppen}
     if hinweis:
         inhalt["hinweis"] = hinweis
     if struktur is not None:
         inhalt["struktur"] = struktur
-    if rotation is not None:
-        inhalt["rotation"] = rotation
+    if einteilung is not None:
+        inhalt["einteilung"] = einteilung
     return {"bereich": bereich, "programm": programm, "ak": ak, "inhalt": inhalt,
             "pruefsumme": content_checksum(inhalt)}
 
@@ -947,10 +1015,9 @@ def publication_rows(state: dict) -> list[dict]:
             continue
         name = program["programm"]
         hint = _rotation_hint(program)
-        # Rotationseinteilung für „Gerät & Rotation“: Stationsfolge und die geprüfte Freigabegrenze (Public!B5).
-        rows.append(_row("startliste", name, "", "startliste", state["startlisten"][name], rotation={
-            "stationsfolge": program["stationsfolge"], "rotationen": program["rotationen"],
-            "freigegeben": program["rotation_freigegeben"]}))
+        # Ansicht „Gerät“: Einteilung aus der Startliste und die geprüfte Freigabegrenze (Public!B5).
+        rows.append(_row("startliste", name, "", "startliste", state["startlisten"][name], einteilung={
+            **state["einteilungen"][name], "freigegeben": program["rotation_freigegeben"]}))
         for group in state["ranglisten"][name]:
             ak = group["ak"]
             live = [r for r in state["einzelwertungen"] if r["programm"] == name and r["ak"] == ak]

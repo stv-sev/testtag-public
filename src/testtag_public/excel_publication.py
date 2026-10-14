@@ -25,7 +25,8 @@ from xml.etree import ElementTree as ET
 from . import excel_probe
 from .excel_probe import ValidationError
 from .publication_model import (
-    ATHLETIK_STATION, BEREICH_BEWEGLICHKEIT, BEREICH_KRAFT, BEREICH_TECHNIK, QUELLE_DIREKT, QUELLE_STATION, Code,
+    ATHLETIK_STATION, BEREICH_BEWEGLICHKEIT, BEREICH_KRAFT, BEREICH_TECHNIK, EINTEILUNG_FELDER, QUELLE_DIREKT,
+    QUELLE_STATION, Code,
     DirectField, Issues, LineDefinition, OnsiteBlock, ProgramSource, RawParticipant, ScoreSlot, SourceInfo,
     StartlistEntry, Station, build_state, clean_text,
 )
@@ -268,17 +269,38 @@ def _read_testprogramm(sheet: _Sheet, issues: Issues, program: str) -> tuple[lis
     return lines, minmax
 
 
+def _read_code_legend(sheet: _Sheet) -> Optional[dict[str, str]]:
+    """Legende der Einteilungscodes (`id_athlete` … `id_position`, darunter die Zeichen `@ ° ç ^`) oder None."""
+    for r in range(1, min(sheet.max_row, 30) + 1):
+        for c in range(1, sheet.max_col + 1):
+            if sheet.text(r, c) != EINTEILUNG_FELDER[0]:
+                continue
+            cols = {sheet.text(r, cc): cc for cc in range(c, min(c + 10, sheet.max_col + 1))}
+            if all(f in cols for f in EINTEILUNG_FELDER):
+                return {f: sheet.text(r + 1, cols[f]) for f in EINTEILUNG_FELDER}
+    return None
+
+
 def _read_startliste(sheet: _Sheet, stations: list[Station], issues: Issues,
-                     program: str) -> tuple[list[StartlistEntry], list[str]]:
+                     program: str) -> tuple[list[StartlistEntry], list[str], Optional[dict[str, str]]]:
+    """Abschnitte je Startgerät mit Position und ID; je Person zusätzlich die Einteilungscodes der Rotationsspalten
+    (`@ID°Rotation çGerät ^Startposition`). Eine Rotationsspalte hat im Abschnittskopf die Rotationsnummer und in der
+    Zeile darunter den Gerätenamen."""
     names = {s.name for s in stations}
     entries, sections = [], []
-    section, id_col = None, None
+    section, id_col, rot_cols = None, None, []
     for r in range(1, sheet.max_row + 1):
         first = sheet.text(r, 1)
         header_id = next((c for c in range(2, sheet.max_col + 1) if sheet.text(r, c) == "ID"), None)
         if first in names and header_id is not None:
             section, id_col = first, header_id
             sections.append(first)
+            rot_cols = []
+            for c in range(header_id + 1, sheet.max_col + 1):
+                nummer = sheet.raw(r, c)
+                if (isinstance(nummer, (int, float)) and not isinstance(nummer, bool)
+                        and sheet.text(r + 1, c) in names):
+                    rot_cols.append((c, sheet.get(r, c), sheet.text(r + 1, c)))
             continue
         position = sheet.raw(r, 1)
         if section is None or isinstance(position, bool) or not isinstance(position, (int, float)):
@@ -288,10 +310,12 @@ def _read_startliste(sheet: _Sheet, stations: list[Station], issues: Issues,
         if isinstance(excel_id, bool) or not isinstance(excel_id, (int, float)):
             _structure(issues, program, f"Startliste!{col_letter(id_col)}{r}: interne ID fehlt.")
             continue
-        entries.append(StartlistEntry(section, position, int(excel_id), r))
+        codes = tuple((nummer, geraet, sheet.get(r, c), f"Startliste!{col_letter(c)}{r}")
+                      for c, nummer, geraet in rot_cols)
+        entries.append(StartlistEntry(section, position, int(excel_id), r, codes))
     if not sections:
         _structure(issues, program, "Startliste: keine Abschnitte je Startgerät gefunden.")
-    return entries, sections
+    return entries, sections, _read_code_legend(sheet)
 
 
 def display_text(value: Any) -> str:
@@ -465,7 +489,7 @@ def read_program_source(
             stations = _read_stations(sheets["Anmeldung"], issues, label)
             participants = _read_participants(sheets["Anmeldung"], issues, label)
             lines, minmax = _read_testprogramm(sheets["Testprogramm"], issues, label)
-            startliste, sections = _read_startliste(sheets["Startliste"], stations, issues, label)
+            startliste, sections, zeichen = _read_startliste(sheets["Startliste"], stations, issues, label)
             zeitplan = _read_zeitplan(sheets["Zeitplan"], issues, label)
             noten = _read_noteneingabe(sheets["Noteneingabe"], stations, issues, label)
         finally:
@@ -474,7 +498,7 @@ def read_program_source(
     return ProgramSource(
         public=public, source=source, stations=stations, line_definitions=lines, ak_minmax=minmax,
         participants=participants, startliste=startliste, startliste_sections=sections, zeitplan=zeitplan,
-        **noten,
+        einteilung_zeichen=zeichen, **noten,
     )
 
 

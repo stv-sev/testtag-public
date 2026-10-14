@@ -306,25 +306,64 @@ class ListsTests(Base):
                                          "programm", "startgeraet"})
         self.assertEqual([g["startgeraet"] for g in state["startlisten"][AK9]], ["Boden", "Sprung", "Reck"])
 
-    def test_startliste_row_carries_station_order_and_released_rotation(self):
+    def test_startliste_row_carries_assignment_from_codes_and_released_rotation(self):
         state = self.state(self.book(AK5, public={"published_rotation_max": 7}), self.book(AK9))
         rows = {(r["bereich"], r["programm"]): r for r in pm.publication_rows(state)}
-        rot5 = rows[("startliste", AK5)]["inhalt"]["rotation"]
+        e5 = rows[("startliste", AK5)]["inhalt"]["einteilung"]
         stationen = [s.name for s in ep.read_program_source(self.dir / "wb1.xlsx", wait_seconds=0,
                                                               sleep=lambda _s: None).stations]
-        self.assertEqual([x["station"] for x in rot5["stationsfolge"]], stationen)  # Reihenfolge tab_startgeraet
-        self.assertEqual({x["station"]: x["bereich"] for x in rot5["stationsfolge"]}["Beweglichkeit"], "athletik")
-        self.assertTrue(all(x["bereich"] == "technik" for x in rot5["stationsfolge"] if x["station"] != "Beweglichkeit"))
-        self.assertEqual((rot5["rotationen"], rot5["freigegeben"]), (8, 7))  # Public!B5, nie B7
-        rot9 = rows[("startliste", AK9)]["inhalt"]["rotation"]
-        self.assertEqual((rot9["rotationen"], len(rot9["stationsfolge"])), (7, 7))
-        self.assertNotIn("Beweglichkeit", [x["station"] for x in rot9["stationsfolge"]])
-        # Freigabe ändert die Startlisten-Zeile (Prüfsumme), die Gruppen bleiben gleich
+        technik = [s for s in stationen if s != "Beweglichkeit"]
+        self.assertEqual(e5["geraete"], technik)  # nur Technikgeräte, Reihenfolge tab_startgeraet
+        self.assertEqual((e5["rotationen"], e5["freigegeben"]), (8, 7))  # Public!B5, nie B7
+        self.assertEqual([(r["rotation"], r["geraet"]) for r in e5["riegen"]],
+                         [(rot, g) for rot in range(1, 9) for g in technik])
+        # Riege je Rotation × Gerät = Abschnitt, der laut Startliste-Code dort turnt, in Startposition
+        n = len(stationen)
+        for riege in e5["riegen"]:
+            start = stationen[(stationen.index(riege["geraet"]) - riege["rotation"] + 1) % n]
+            gruppe = next((g for g in state["startlisten"][AK5] if g["startgeraet"] == start), {"teilnehmer": []})
+            self.assertEqual(riege["teilnehmer"], [t["teilnehmer"] for t in gruppe["teilnehmer"]], riege)
+        self.assertTrue(any(r["teilnehmer"] for r in e5["riegen"]))
+        e9 = rows[("startliste", AK9)]["inhalt"]["einteilung"]
+        self.assertEqual((e9["rotationen"], len(e9["geraete"]), len(e9["riegen"])), (7, 7, 49))
+        # Freigabe ändert die Startlisten-Zeile (Prüfsumme), Gruppen und Riegen bleiben gleich
         lower = self.state(self.book(AK5, public={"published_rotation_max": 3}), self.book(AK9))
         row3 = next(r for r in pm.publication_rows(lower) if r["bereich"] == "startliste" and r["programm"] == AK5)
-        self.assertEqual(row3["inhalt"]["rotation"]["freigegeben"], 3)
+        self.assertEqual(row3["inhalt"]["einteilung"]["freigegeben"], 3)
+        self.assertEqual(row3["inhalt"]["einteilung"]["riegen"], e5["riegen"])
         self.assertEqual(row3["inhalt"]["gruppen"], rows[("startliste", AK5)]["inhalt"]["gruppen"])
         self.assertNotEqual(row3["pruefsumme"], rows[("startliste", AK5)]["pruefsumme"])
+        self.assertNotIn("rotation", row3["inhalt"])
+
+    def test_assignment_codes_are_validated(self):
+        n = len(testtag_spec(AK5)["stations"])
+        faelle = {
+            "fehlt": {(1, 1): None},
+            "unlesbar": {(1, 1): "@1-1-1-1"},
+            "andere ID": {(1, 1): "@2°1ç1^1"},
+            "andere Rotation": {(1, 2): "@1°3ç2^1"},
+            "anderes Gerät": {(1, 1): "@1°1ç2^1"},
+            "Position 0": {(1, 1): "@1°1ç1^0"},
+        }
+        for fall, codes in faelle.items():
+            with self.subTest(fall=fall):
+                self.error(Code.EINTEILUNG_UNGUELTIG, self.book(AK5, startliste_codes=codes))
+        with self.subTest(fall="ohne Legende"):
+            self.error(Code.EINTEILUNG_UNGUELTIG, self.book(AK5, ohne_legende=True))
+        # doppelte Startposition an einem Gerät in einer Rotation (beide Personen im Abschnitt Pferd)
+        pferd = [p[0] for p in testtag_spec(AK5)["participants"] if p[7] == "Pferd"]
+        self.assertGreaterEqual(len(pferd), 2)
+        a, b = pferd[:2]
+        stationen = [s for s, _c in testtag_spec(AK5)["stations"]]
+        ger = stationen.index("Pferd") + 1
+        with self.subTest(fall="doppelte Position"):
+            self.error(Code.EINTEILUNG_UNGUELTIG, self.book(AK5, startliste_codes={(b, 1): f"@{b}°1ç{ger}^1"}))
+        # Rotation laut Noteneingabe widerspricht der Einteilung (gültige, aber andere Rotation)
+        start = next(p[7] for p in testtag_spec(AK5)["participants"] if p[0] == 1)
+        falsch = (stationen.index("Boden") - stationen.index(start) + 1) % n + 1
+        with self.subTest(fall="id_rotation anders"):
+            self.error(Code.EINTEILUNG_UNGUELTIG, self.book(AK5, scores={(1, "Boden", 1): (5, 1, 5)},
+                                                            rotation={(1, "Boden", 1): falsch}))
 
     def test_display_texts_are_cleaned(self):
         people = testtag_spec(AK5)["participants"]

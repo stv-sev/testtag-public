@@ -283,19 +283,35 @@ def make_testtag_workbook(path: Path, program: str = AK5, spec: dict | None = No
             ws.cell(r, 11 + v, lo)
             ws.cell(r, 12 + v, hi)
 
+    # Startliste wie produktiv: Legende der Einteilungscodes, je Abschnitt Rotationskopf (L…) mit Gerätezeile darunter,
+    # je Person der Code @ID°Rotation çGerät ^Startposition (ç = Position in tab_startgeraet), dazu eine weitere
+    # Zahlenspalte ohne Gerät. `startliste_codes[(id, rotation)]` ersetzt einen Code, `ohne_legende` lässt sie weg.
     ws = wb.create_sheet("Startliste")
     ws["A1"] = "Synthetischer Testtag"
+    if not spec.get("ohne_legende"):
+        for col, (feld, zeichen) in enumerate(zip(("id_athlete", "id_rotation", "id_apparatus", "id_position"),
+                                                  ("@", "°", "ç", "^")), 13):
+            ws.cell(3, col, feld); ws.cell(4, col, zeichen)
+    ersatz = spec.get("startliste_codes", {})
+    n = len(station_names)
     row = 6
     for name in station_names:
         ws.cell(row, 1, name); ws.cell(row, 8, "ID")
         for col, head in enumerate(("Pos", "Name", "Vorname", "Jahrgang", "Kategorie", "Verein"), 1):
             ws.cell(row + 1, col, head)
+        folge = [station_names[(station_names.index(name) + r) % n] for r in range(n)]
+        for r, geraet in enumerate(folge, 1):
+            ws.cell(row, 11 + r, r); ws.cell(row + 1, 11 + r, geraet)
+        ws.cell(row, 12 + n, n + 1); ws.cell(row + 1, 12 + n, "Total")
         row += 2
         group = [p for p in spec["participants"] if p[7] == name]
         for pos, (pid, pname, first, year, club, ak, _k, _s) in enumerate(group, 1):
             for col, value in enumerate((pos, pname, first, year, ak, club), 1):
                 ws.cell(row, col, value)
             ws.cell(row, 8, pid)
+            for r, geraet in enumerate(folge, 1):
+                code = f"@{pid}°{r}ç{station_names.index(geraet) + 1}^{pos}"
+                ws.cell(row, 11 + r, ersatz.get((pid, r), code))
             row += 1
         row += 2
 

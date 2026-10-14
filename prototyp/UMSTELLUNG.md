@@ -12,8 +12,8 @@ und Messberichte.
 | Ansicht | Wo | Adresse |
 |---|---|---|
 | Live | statische Seite | `https://stv-sev.github.io/testtag-public/?t=<slug>` (`&p=…&ak=…`) |
+| Gerät | statische Seite | `…/?t=<slug>&ansicht=geraet&p=…&g=<Gerät>&r=<Rotation>` (`&ak=…` optional) |
 | Ranglisten | statische Seite | `…/?t=<slug>&ansicht=rangliste` (`&p=…&ak=…&art=technik\|athletik`) |
-| Technik „Gerät & Rotation“ | statische Seite | `…&ansicht=rangliste&art=technik&sicht=rotation&g=<Gerät>&r=<Rotation>` |
 | Startliste | statische Seite | `…/?t=<slug>&ansicht=startliste` (`&p=…`) |
 | Zeitplan | statische Seite | `…/?t=<slug>&ansicht=zeitplan` |
 | Übersicht (Live, Demnächst, Archiv) | statische Seite | `https://stv-sev.github.io/testtag-public/` |
@@ -28,7 +28,7 @@ statische Übersicht. Archivierte Testtage bleiben vollständig in Streamlit; di
 
 | Ort | Schalter | Wirkung |
 |---|---|---|
-| `docs/config.js` | `ansichten: ["rangliste", "startliste", "zeitplan"]` | Ansichten auf der statischen Seite zusätzlich zu Live. Fehlt eine, führen Pille und Links `&ansicht=…` ohne Datenabruf nach `streamlitUrl/?t=<slug>&ansicht=…` |
+| `docs/config.js` | `ansichten: ["rangliste", "startliste", "zeitplan"]` | Ansichten auf der statischen Seite zusätzlich zu Live; „Gerät“ kommt mit den Ranglisten. Fehlt eine, führen Pille und Links `&ansicht=…` ohne Datenabruf nach `streamlitUrl/?t=<slug>&ansicht=…` |
 | `docs/config.js` | `rueckfall: false` / `true` | `true`: jeder Aufruf geht vor dem ersten Datenabruf nach Streamlit (`?t=<slug>&ansicht=live\|rangliste\|startliste\|zeitplan`; ohne `?t=` auf die Streamlit-Übersicht) |
 | `docs/config.js` | `streamlitUrl: "https://testtag.streamlit.app"` | Ziel für Archiv, fehlende Ansichten und Rückfall – nicht ändern |
 | Streamlit-Secrets | `live_url = "https://stv-sev.github.io/testtag-public/"` | Live und „← Alle Testtage“ auf der statischen Seite; ohne: alles in Streamlit. Gilt nur als `https://`-Adresse ohne Abfrage |
@@ -46,7 +46,7 @@ vollständigen Rückfall.
 
 ### Freischaltung
 
-Voraussetzungen: Der Publisher läuft mit dem Code dieses Branchs (sonst zeigt „Gerät & Rotation“ „nicht verfügbar“;
+Voraussetzungen: Der Publisher läuft mit dem aktuellen Code (sonst zeigt „Gerät“ nur einen Hinweis;
 alles andere funktioniert). Beide Mappen des Testtags tragen in `Public!B2` denselben Slug (zurzeit offen:
 `261031-Test-AK9-AK12.xlsx` hat noch `aargau-lenzburg-2026-10-09`).
 
@@ -63,7 +63,8 @@ alles andere funktioniert). Beide Mappen des Testtags tragen in `Public!B2` dens
 4. Mit Telefon und Laptop durchklicken (synthetischer Testtag, danach wieder verbergen):
    - Übersicht → Testtag.
    - Live ⇄ Ranglisten ⇄ Startliste ⇄ Zeitplan: Programm und AK bleiben, die Zurück-Taste funktioniert.
-   - Ranglisten: drei Ebenen, gestufte Details, Technik „Gerät & Rotation“ (nur freigegebene Rotationen wählbar).
+   - Gerät: Riege je Gerät und Rotation (nur freigegebene Rotationen wählbar).
+   - Ranglisten: drei Ebenen, gestufte Details.
    - Bisherige Links `https://testtag.streamlit.app/?t=<slug>` und `…&ansicht=startliste` führen mit einem Klick auf
      die statische Seite.
    - Ein archivierter Testtag öffnet Streamlit.
@@ -84,8 +85,8 @@ einen allfälligen Rückfall wach ist.
 2. `docs/config.js` auf `main`: denselben Bereich aus `ansichten` entfernen, committen, pushen → Pille und Links
    `&ansicht=startliste` führen ohne Datenabruf nach `https://testtag.streamlit.app/?t=<slug>&ansicht=startliste`.
 
-Beim Rückfall der Ranglisten gibt die Umleitung die Ebene mit. Aus „Gerät & Rotation“ zeigt Streamlit die
-Technik-Rangliste mit dem Hinweis „«Gerät & Rotation» ist in dieser Ansicht nicht verfügbar …“.
+Beim Rückfall der Ranglisten gibt die Umleitung die Ebene mit. „Gerät“ folgt den Ranglisten (keine Pille mehr); aus
+„Gerät“ zeigt Streamlit die Technik-Rangliste mit dem Hinweis „«Gerät» ist in dieser Ansicht nicht verfügbar …“.
 
 **Alles** (auch Live und Übersicht):
 1. Streamlit-Secrets: Zeilen `live_url` und `statische_bereiche` löschen → alles wieder in Streamlit.
@@ -112,7 +113,20 @@ Pages-Build die Secrets.
 
 ---
 
-## Nachtrag 14.10.2026: gestufte Gesamtdetails, Technik „Gerät & Rotation“
+## Nachtrag 14.10.2026 abends: eigene Ansicht „Gerät“, Einteilung aus der Startliste
+
+- **Warum vorher „nicht verfügbar“:** Die statische Seite liest nie Excel. Die produktive Publikation stammte noch
+  vom alten Publisher und enthielt keine Einteilung. Sichtbar wird sie erst nach einem Publisher-Lauf mit neuem Code.
+- **Publisher:** Die Einteilung kommt jetzt direkt aus den Codes `@ID°Rotation çGerät ^Startposition` im Blatt
+  `Startliste` (statt aus Startgerät + Stationsfolge berechnet). An allen vier Mappen in `00-tool` geprüft (lesend):
+  alle Codes gültig, `ç` = Position in `tab_startgeraet` (nicht GerID), `^` = Pos, Einteilung = `id_rotation`
+  (574/574 bzw. 182/182). Neue Zeile `inhalt.einteilung` ersetzt `inhalt.rotation`; neuer Fehlercode
+  `EINTEILUNG_UNGUELTIG`.
+- **Seite:** „Gerät“ ist eine eigene Pille (Live · Gerät · Ranglisten · Startliste · Zeitplan); der Umschalter unter
+  Technik entfällt; frühere Adressen öffnen „Gerät“. Streamlit zeigt bei statischen Ranglisten die Link-Pille
+  „🤸 Gerät“, im Rückfall Hinweis und Technik-Rangliste.
+
+## Nachtrag 14.10.2026: gestufte Gesamtdetails, Technik „Gerät & Rotation“ (abgelöst, siehe oben)
 
 Nichts produktiv umgeschaltet; `main`, Pages, Secrets, Excel und die öffentliche Publikation unverändert.
 
@@ -227,13 +241,13 @@ Supabase-Antwortzeit Median 44–52 ms.
 
 Stand 14.10.2026 (Einzelheiten in den Nachträgen):
 - `python -m pytest tests` – 328 Tests, drei volle Läufe hintereinander grün; darin die Secrets `live_url` und
-  `statische_bereiche` (alle, teilweise, ungültig) und der Rückfall aus „Gerät & Rotation“.
+  `statische_bereiche` (alle, teilweise, ungültig), die Pille „Gerät“ und der Rückfall aus „Gerät“.
 - `rangliste_daten.py` + `rangliste_test.mjs` (Chromium gegen nachgebildete Data API, nur synthetische Stände):
   **126 von 126 Ansichten identisch mit der Streamlit-Darstellung** (102 Ranglisten, übrige Startliste/Zeitplan);
   Stände Freigabe 0, Rotationsgrenze, alle Rotationen, Korrektur, ältere Publikation ohne `struktur`, vollständiger
   Testtag (108 Personen). Dazu Wechsel ohne Neuladen, Adresse, Zurück/Vorwärts, Korrektur mit offenen Details,
   offline, Prüfsummenfehler, verborgen, Archivlink, 390/1280 px, Schalter `ansichten` (fehlende Ansicht → Streamlit
-  ohne Datenabruf) und `rueckfall: true` (alle vier Ansichten, „Gerät & Rotation“ mit Ebene) – alle bestanden.
+  ohne Datenabruf) und `rueckfall: true` (alle Ansichten, „Gerät“ als Technik-Rangliste) – alle bestanden.
 - `pruefsumme_test.mjs` – Prüfsummen von `live.js` gleich wie beim Publisher (synthetische Zeilen).
 - `navigation_test.mjs` – Streamlit mit `live_url` und `statische_bereiche = ["rangliste", "startliste", "zeitplan"]`,
   synthetischer Testtag in Supabase: alle Wege zwischen den vier Ansichten, alte Streamlit-Links je Ansicht.

@@ -12,7 +12,7 @@ von app._zeitplan – also genau so, wie die Streamlit-App sie zeigt:
   r2            Rotationsgrenze: nur Rotation 1–2 freigegeben (Athletik noch offen)
   r8            alle Rotationen freigegeben (neue Resultate gegenüber r2)
   korrektur     korrigierte Note (Rang- und Totaländerung) und erstes Resultat einer bisher leeren Person
-  ohne_struktur ältere Publikation ohne `struktur` und ohne Rotationseinteilung der Startliste, dazu ein Eintrag mit
+  ohne_struktur ältere Publikation ohne `struktur` und ohne Einteilung (Gerät) der Startliste, dazu ein Eintrag mit
                 widersprüchlichem Total
   gross         optional: vollständig gefüllter Testtag (108 Personen, alle Resultate) aus <voll-ordner>
 `vergleichen` prüft die im Browser gezeichneten Ansichten (rangliste_test.mjs) gegen diese Erwartung.
@@ -125,7 +125,7 @@ def erzeugen(ziel: Path, voll: Path | None):
     alt = json.loads(json.dumps(staende[-1][2]))
     for z in alt:
         if z["bereich"] == q.STARTLISTE:
-            z["inhalt"].pop("rotation", None)
+            z["inhalt"].pop("einteilung", None)
         if z["bereich"] == q.RANGLISTE:
             z["inhalt"].pop("struktur", None)
             if z["programm"] == AK5 and z["ak"] == "AK 7":

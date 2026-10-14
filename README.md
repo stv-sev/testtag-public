@@ -563,10 +563,24 @@ vorgesehenen Geräten und Linien (`code`, `anzeige`, bei Sprung-Alternativen `al
 Sie ist nötig, damit ein noch fehlendes Resultat als „–“ erscheinen kann. Ältere Stände ohne `struktur` (z. B.
 bestehende Archive) zeigen nur die veröffentlichten Linien und Tests.
 
-Jede Zeile `startliste` enthält `inhalt.rotation` = `{stationsfolge: [{station, bereich: technik|athletik}, …],
-rotationen, freigegeben}`: die Stationen in der Reihenfolge von `tab_startgeraet` und die geprüfte Freigabegrenze
-(`Public!B5`). Die Riege mit Startgerät an Position *i* steht in Rotation *r* an Station (*i* + *r* − 1) mod *n*
-(gleich wie `id_rotation` der Noteneingabe). Daraus zeigt die statische Seite unter Technik „Gerät & Rotation“; ältere
-Stände ohne `rotation` zeigen dort nur einen Hinweis. Im Streamlit-Rückfall gibt es diese Sicht nicht: Streamlit zeigt einen Hinweis und die
-Technik-Rangliste.
+## Ansicht „Gerät“
+
+Eigene Pille auf der statischen Seite (Reihenfolge: Live · Gerät · Ranglisten · Startliste · Zeitplan). Wählbar sind
+Programm, Gerät, Rotation und optional die AK. Gezeigt wird die Riege, die in dieser Rotation an diesem Gerät turnt,
+in Startreihenfolge – auch ohne Note; bei veröffentlichten Resultaten Gerätetotal und Linien S/T, ohne Ränge. Wählbar
+sind nur Rotationen 1 bis zur Freigabe (`Public!B5`), auch über die Adresse; sinkt die Freigabe, wird eine nicht mehr
+zulässige Auswahl verworfen. Es gibt keine „aktuelle Rotation“: ohne Wahl wird keine Riege gezeigt.
+
+**Einteilung aus Excel:** Der Publisher übernimmt die Einteilung direkt aus dem Blatt `Startliste`: Dort steht je
+Person und Rotation der Code `@ID°Rotation çGerät ^Startposition` (Zeichen laut Legende `id_athlete … id_position`;
+`ç` = Position des Geräts in `tab_startgeraet`). Er prüft jeden Code gegen Zeile und Spalte, verlangt jede Rotation und
+Station je Person genau einmal und eindeutige Startpositionen und gleicht die Einteilung mit `id_rotation` der
+Noteneingabe ab. Bei einem Widerspruch (`EINTEILUNG_UNGUELTIG`) wird nichts geschrieben.
+
+**Publikationsformat:** Jede Zeile `startliste` enthält `inhalt.einteilung` = `{rotationen, freigegeben, geraete,
+riegen: [{rotation, geraet, teilnehmer: [Schlüssel in Startreihenfolge]}]}`. Ältere Stände ohne `einteilung` zeigen
+nur den Hinweis „Die Einteilung nach Gerät wird mit der nächsten Publikation verfügbar.“ Die Pille „Gerät“ gibt es,
+sobald die Ranglisten statisch angeboten werden (kein eigener Schalter). Streamlit kennt „Gerät“ nicht: Im Rückfall
+zeigt es einen Hinweis und die Technik-Rangliste; frühere Adressen `&ansicht=rangliste&art=technik&sicht=rotation`
+öffnen „Gerät“.
 

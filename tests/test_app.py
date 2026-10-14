@@ -407,14 +407,14 @@ class AppTests(unittest.TestCase):
         self.assert_clean(at)
 
     def test_rotation_view_falls_back_to_technik_ranking_with_hint(self):
-        """Rückfall: „Gerät & Rotation“ der statischen Seite gibt es hier nicht – Hinweis und Technik-Rangliste."""
+        """Rückfall: „Gerät“ der statischen Seite gibt es hier nicht – Hinweis und Technik-Rangliste."""
         at = self.app(TT_SLUG, ansicht="rangliste", adresse={"p": AK5, "art": "technik", "sicht": "rotation",
                                                              "g": "Boden", "r": "3"})
         self.assertEqual(at.radio(key="bereich").value, q.RANGLISTE)
         self.assertEqual(at.radio(key="rl_art").value, "technik")
         hinweis = [i.value for i in at.info]
         self.assertEqual(len(hinweis), 1, hinweis)
-        self.assertTrue(hinweis[0].startswith("«Gerät & Rotation» ist in dieser Ansicht nicht verfügbar. Angezeigt "
+        self.assertTrue(hinweis[0].startswith("«Gerät» ist in dieser Ansicht nicht verfügbar. Angezeigt "
                                               "wird die Technik-Rangliste"), hinweis)
         self.assertTrue(self.raenge(at))  # normale Technik-Rangliste mit Rängen
         self.assertFalse({"art", "sicht", "g", "r"} & set(at.query_params))  # einmal übernommen, Ebene frei wählbar
@@ -439,6 +439,36 @@ class AppTests(unittest.TestCase):
                       adresse={"art": "technik", "sicht": "rotation"})
         self.assertEqual(at.query_params["sicht"], ["rotation"])
         self.assertEqual([i.value for i in at.info], [])
+        # neue Adresse &ansicht=geraet im Rückfall: ebenfalls Technik-Rangliste mit Hinweis, Adresse auf Ranglisten
+        at = self.app(TT_SLUG, ansicht="geraet", adresse={"g": "Boden", "r": "1"})
+        self.assertEqual(at.radio(key="bereich").value, q.RANGLISTE)
+        self.assertEqual(at.radio(key="rl_art").value, "technik")
+        self.assertEqual([i.value for i in at.info], hinweis)
+        self.assertEqual(at.query_params["ansicht"], ["rangliste"])
+        self.assertFalse({"g", "r"} & set(at.query_params))
+        self.assertTrue(self.raenge(at))
+
+    def test_geraet_pill_follows_static_rankings(self):
+        """„Gerät“ gibt es nur statisch: Pille nach Live, sobald die Ranglisten statisch sind; Verweis ohne Datenabruf."""
+        basis = "https://stv-sev.github.io/testtag-public/"
+        alle = ["rangliste", "startliste", "zeitplan"]
+        at = self.app(TT_SLUG, ansicht="geraet", live_url=basis, statische_bereiche=alle)
+        roh = self.roh(at)
+        reihenfolge = [roh.index(f"href='{basis}?t={TT_SLUG}{z}'") for z in
+                       ("", "&amp;ansicht=geraet", "&amp;ansicht=rangliste", "&amp;ansicht=startliste",
+                        "&amp;ansicht=zeitplan")]
+        self.assertEqual(reihenfolge, sorted(reihenfolge))  # Live · Gerät · Ranglisten · Startliste · Zeitplan
+        self.assertIn("🤸 Gerät", self.text(at))
+        self.assertIn("Die Riegen je Gerät und Rotation werden auf einer eigenen, schnellen Seite angezeigt.",
+                      self.text(at))
+        self.assertIn("🤸 Gerät öffnen", self.text(at))
+        self.assertEqual(sum("/veroeffentlichung?" in c["url"] for c in self.api.calls), 0)
+        self.assert_clean(at)
+        for schalter in (["startliste", "zeitplan"], []):  # Ranglisten in Streamlit: keine Pille „Gerät“
+            with self.subTest(schalter=schalter):
+                at = self.app(TT_SLUG, live_url=basis, statische_bereiche=schalter)
+                self.assertNotIn("ansicht=geraet", self.roh(at))
+                self.assertNotIn("🤸 Gerät", self.text(at))
 
     # ── Startliste und Zeitplan ──
     def test_startliste_grouped_by_program_and_apparatus_with_five_columns(self):
