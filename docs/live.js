@@ -36,7 +36,7 @@
  * Frühere Adressen `&ansicht=rangliste&art=technik&sicht=rotation` öffnen „Gerät“.
  *
  * Beamer (`&beamer=1`, immer Live; `&p=`, `&ak=`, `&g=` filtern wie sonst): dunkel, gross, ohne Bedienung, nur die
- * neuesten Noten – so viele, wie auf den Bildschirm passen, ohne Scrollen. Noten, die während der Anzeige neu
+ * neuesten 8 Noten, ohne Scrollen (bei sehr flachem Bildschirm weniger). Noten, die während der Anzeige neu
  * erscheinen (oder korrigiert werden), sind eine Minute lang hervorgehoben. Der Bildschirm wird wach gehalten.
  */
 "use strict";
@@ -49,7 +49,7 @@
   const VERALTET_NACH = 12000;
   const TAKT_UEBERSICHT = 60000;
   const MAX_LIVE = 300;
-  const BEAMER_MAX = 40;       // höchstens so viele Zeilen zeichnen; sichtbar bleiben die, die passen
+  const BEAMER_MAX = 8;        // Beamer: die neuesten 8 Noten (passt eine nicht ganz, wird sie ausgeblendet)
   const NEU_MS = 60000;        // Beamer: so lange gilt eine Note als neu
   const LIVE = "resultate_live";
   const RANGLISTE = "resultate_rangliste";

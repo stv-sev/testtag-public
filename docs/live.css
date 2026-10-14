@@ -130,7 +130,7 @@ body { margin: 0; background: #fff; color: #0D4E73; font-family: "Source Sans Pr
 /* Beamer (`&beamer=1`): dunkler Grund, helle Schrift, keine Bedienung; die Schrift wächst mit der Bildschirmhöhe,
    damit immer etwa gleich viele Zeilen Platz haben. */
 html.tt-beamer { color-scheme: dark; background: #06192A; }
-.tt-beamer body { background: #06192A; color: #EAF3F8; font-size: clamp(16px, min(3.4vh, 2vw), 80px); line-height: 1.25;
+.tt-beamer body { background: #06192A; color: #EAF3F8; font-size: clamp(16px, min(3.85vh, 2.25vw), 90px); line-height: 1.25;
                   overflow: hidden; cursor: none; }
 .tt-beamer .tt-seite { max-width: none; padding: .5em 1em 0; }
 .tt-beamer .tt-zurueck, .tt-beamer .tt-nav, .tt-beamer .tt-filter, .tt-beamer .tt-arten, .tt-beamer .tt-anzahl,
