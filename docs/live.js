@@ -588,10 +588,12 @@
       return;
     }
     const alle = sortiere(schl.flatMap((s) => zeilen.get(s).resultate || []));
-    // Gerätefilter: Geräte mit veröffentlichten Resultaten, Reihenfolge der Stationsfolge (Startliste), übrige danach
+    // Gerätefilter: alle Stationen der Startliste (Stationsfolge), dazu Beweglichkeit und Kraft (auch extern, ohne
+    // Station) – unabhängig davon, ob schon Resultate vorliegen; weitere Geräte aus Resultaten danach
     const folge = [...new Set(schl.flatMap((s) => ((zeilen.get(s).einteilung || {}).geraete || [])))];
+    if (folge.length) for (const b of Object.values(ATHLETIK_TEXT)) if (!folge.includes(b)) folge.push(b);
     const rang = (g) => (folge.includes(g) ? folge.indexOf(g) : folge.length);
-    const geraete = [...new Set(alle.map(geraetName))].sort((a, b) => rang(a) - rang(b) || (a < b ? -1 : a > b ? 1 : 0));
+    const geraete = [...new Set([...folge, ...alle.map(geraetName)])].sort((a, b) => rang(a) - rang(b) || (a < b ? -1 : a > b ? 1 : 0));
     const geraet = geraete.includes(auswahl.geraet) ? auswahl.geraet : ALLE;  // Auswahl selbst bleibt erhalten
     el.filter2.hidden = !geraete.length;
     if (geraete.length) optionen(el.geraet, geraete, geraet, (g) => g, true);

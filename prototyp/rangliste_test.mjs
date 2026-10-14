@@ -286,8 +286,12 @@ const gezeichnet = {};
   await page.goto(adresse("&p=AK5-AK9%2B"));
   await page.waitForSelector(".tt-liste .tt-karte");
   const liveGeraete = await page.locator("#geraet option").allTextContents();
-  pruefe(liveGeraete[0] === "Alle" && liveGeraete.length > 2 && await page.locator("#rotation").isHidden(),
-    `Live: Gerätefilter ${liveGeraete.join(" · ")} (ohne Rotation)`);
+  pruefe(JSON.stringify(liveGeraete) === JSON.stringify(["Alle", "Boden", "Pferd", "Ringe", "Beweglichkeit", "Sprung", "Barren",
+    "Trampolin", "Reck", "Kraft"]) && await page.locator("#rotation").isHidden(),
+  `Live: Gerätefilter mit allen Geräten, auch ohne Resultate: ${liveGeraete.join(" · ")} (ohne Rotation)`);
+  await page.selectOption("#geraet", "Reck");  // in Freigabe 2 noch ohne Resultat
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Noch keine Resultate."));
+  pruefe(params().get("g") === "Reck", "Gerät ohne Resultate: „Noch keine Resultate.“");
   const stationen = ["Boden", "Pferd", "Ringe", "Beweglichkeit", "Sprung", "Barren", "Trampolin", "Reck"];
   const ohneKraft = liveGeraete.slice(1).filter((g) => g !== "Kraft");
   pruefe(ohneKraft.every((g, i) => i === 0 || stationen.indexOf(g) > stationen.indexOf(ohneKraft[i - 1]))

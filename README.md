@@ -598,8 +598,9 @@ Einzelpfade; beides zugleich wird abgewiesen). Gilt für Publisher, `--check` un
 
 ## Live: Gerätefilter
 
-Neben Programm und AK lässt sich Live auf ein Gerät einschränken (Standard „Alle“). Angeboten werden die Geräte mit
-veröffentlichten Resultaten der Auswahl, in der Stationsfolge der Startliste; Kraft (ohne Station) am Schluss. Die
+Neben Programm und AK lässt sich Live auf ein Gerät einschränken (Standard „Alle“). Angeboten werden immer alle
+Geräte: die Stationen der Startliste in ihrer Folge, dazu Beweglichkeit und Kraft (auch extern erfasst); gibt es für
+ein Gerät noch keine Resultate, steht „Noch keine Resultate.“ Die
 Wahl steht in der Adresse (`&g=`) und gilt auch in „Gerät“.
 
 **Texte:** bewusst kurz und ohne Symbole (Pillen „Live · Gerät · Ranglisten · Startliste · Zeitplan“, Status „Live“ /
