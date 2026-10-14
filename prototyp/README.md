@@ -1,13 +1,13 @@
-# Prototyp: statische Live-Ansicht (Branch `prototyp-live-statisch`)
+# Statische Seite: Entstehung und Prüfwerkzeuge
 
-Ziel: 50 gleichzeitige Zuschauer zuverlässig bedienen, ohne Streamlit-Prozess je Zuschauer. Auf dem Branch
-`umstellung-live-statisch` zeigt die Seite **Live und Ranglisten**; Startliste, Zeitplan und Archiv bleiben in
-Streamlit (Links auf `testtag.streamlit.app/?t=<slug>&ansicht=…`). Navigation, statische Rangliste, Messungen,
-Umschalt- und Rückfallablauf: [UMSTELLUNG.md](UMSTELLUNG.md). Die Abschnitte unten beschreiben den Live-Prototyp.
-`main`, die Streamlit-App, der Publisher, die Excel-Mappen, das Schema und die RLS-Regeln sind unverändert.
+Ziel war, 50 gleichzeitige Zuschauer ohne Streamlit-Prozess je Zuschauer zu bedienen. Seit dem 14.10.2026 ist die
+statische Seite produktiv (Live, Gerät, Ranglisten, Startliste, Zeitplan, Übersicht; Archiv in Streamlit).
+Betrieb und Rückfall: [BETRIEB.md](../BETRIEB.md#öffentliche-seite), Verlauf und Messungen:
+[UMSTELLUNG.md](UMSTELLUNG.md). Die Abschnitte unten beschreiben den ursprünglichen Live-Prototyp; die
+Testskripte in diesem Ordner prüfen die aktuelle Seite.
 
 - **Seite:** `docs/` (index.html, live.css, live.js, rangliste.js, config.js, logo.png), keine Abhängigkeiten, kein Build.
-- **Hosting:** GitHub Pages aus diesem Branch, Ordner `/docs` → <https://stv-sev.github.io/testtag-public/?t=<slug>>.
+- **Hosting:** GitHub Pages aus `main`, Ordner `/docs` → <https://stv-sev.github.io/testtag-public/?t=<slug>>.
   Kostenlos für öffentliche Repositories; einmalig eingeschaltet unter Settings → Pages. Dateien werden 10 min
   zwischengespeichert (`Cache-Control: max-age=600`).
 - **Umfang:** live.js 458 Zeilen (396 ohne Kommentare/Leerzeilen), live.css 67, index.html 40, config.js 8.

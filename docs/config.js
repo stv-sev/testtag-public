@@ -1,4 +1,4 @@
-// Öffentliche Konfiguration der statischen Live-Ansicht (Prototyp).
+// Öffentliche Konfiguration der statischen Seite (GitHub Pages, main /docs).
 // Nur der Publishable Key (sb_publishable_…) ist zulässig – er ist für Browser bestimmt und durch RLS
 // auf öffentliche Testtage beschränkt. Nie einen Secret Key eintragen; live.js weist jeden anderen Schlüssel ab.
 window.TT_CONFIG = Object.freeze({
