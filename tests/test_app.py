@@ -294,7 +294,7 @@ class AppTests(unittest.TestCase):
         for slug in (TT_SLUG, ARCHIV_SLUG):
             with self.subTest(slug=slug):
                 at = self.app(slug, live_url=basis)
-                self.assertIn(f"<a class='tt-pille tt-alle' href='{basis}' target='_self'>← Alle Testtage</a>", self.roh(at))
+                self.assertIn(f"<a class='tt-pille tt-alle' href='{basis}' target='_top'>← Alle Testtage</a>", self.roh(at))
                 self.assertFalse([b for b in at.button if b.key == "zurueck"])
         at = self.app(TT_SLUG)  # ohne live_url: bisheriger Knopf zur Streamlit-Übersicht
         self.assertTrue([b for b in at.button if b.key == "zurueck"])

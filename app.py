@@ -337,7 +337,7 @@ def statische_links(testtag) -> dict[str, str]:
 
 
 def _live_pille(link: str, text: str = "Live") -> str:
-    return f"<a class='tt-pille' href='{_h(link)}' target='_self'>{_h(text)}</a>"
+    return f"<a class='tt-pille' href='{_h(link)}' target='_top'>{_h(text)}</a>"
 
 
 def _bereiche(links: dict[str, str]) -> list[str]:
@@ -793,7 +793,7 @@ def zeichne() -> None:
         return
     basis = _live_basis()
     if basis:  # Übersicht der statischen Seite (auch aus dem Archiv)
-        _html([f"<a class='tt-pille tt-alle' href='{_h(basis)}' target='_self'>← Alle Testtage</a>"])
+        _html([f"<a class='tt-pille tt-alle' href='{_h(basis)}' target='_top'>← Alle Testtage</a>"])
     else:
         st.button("← Alle Testtage", on_click=_zur_uebersicht, key="zurueck")
     merk = f"testtag|{kennung}"
