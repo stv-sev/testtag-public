@@ -388,12 +388,14 @@ class AppTests(unittest.TestCase):
         self.assertNotIn("tt-chip", rl)
         erste = klartext(karten[0].split("</summary>", 1)[1])  # Details erst nach Antippen
         self.assertIn("Total Technik 7.5 Boden 7.5 Synth Boden vorwärts S 5 T 7.5", erste)  # gestuft
-        self.assertIn("Total Athletik 8 Total Kraft 8 Standweitsprung 8", erste)
-        self.assertIn("Seitspagat – Gesamt 15.5", erste)
+        self.assertIn("Total Athletik 8 Total Beweglichkeit – Bücke –", erste)  # Beweglichkeit vor Kraft
+        self.assertIn("Seitspagat – Total Kraft 8 Standweitsprung 8", erste)
+        self.assertIn("Liegestütz – Gesamt 15.5", erste)
         ohne = klartext(karten[-1].split("</summary>", 1)[1])  # Person ohne Resultat: keine scheinbaren Nullwerte
         self.assertTrue(ohne.startswith("Total Technik – Boden –"), ohne)
-        self.assertIn("Total Athletik – Total Kraft –", ohne)
-        self.assertIn("Seitspagat – Gesamt –", ohne)
+        self.assertIn("Total Athletik – Total Beweglichkeit –", ohne)
+        self.assertIn("Seitspagat – Total Kraft –", ohne)
+        self.assertIn("Liegestütz – Gesamt –", ohne)
         at.radio(key="rl_art").set_value("technik").run()
         rl = self.block(at, "tt-liste tt-rangliste")
         self.assertIn("Boden 7.5 Synth Boden vorwärts S 5 T 7.5", klartext(rl))  # Gerät aufklappbar, S/T

@@ -191,10 +191,10 @@
     + "</div>", k === undefined ? undefined : `${k}|${i}`));
 
   const DETAILS = {
-    // Gestuft: Total Technik → Geräte → Linien; Total Athletik → Kraft/Beweglichkeit → Tests; Gesamt.
+    // Gestuft: Total Technik → Geräte → Linien; Total Athletik → Beweglichkeit/Kraft → Tests; Gesamt.
     gesamt(e, d, v, k) {
       const unter = (s) => (k === undefined ? undefined : `${k}|${s}`);
-      const athletik = ["kraft", "beweglichkeit"].map((b) => aufklappbar(`Total ${ATHLETIK_TEXT[b]}`, v[b] ? e[b] : null,
+      const athletik = ["beweglichkeit", "kraft"].map((b) => aufklappbar(`Total ${ATHLETIK_TEXT[b]}`, v[b] ? e[b] : null,
         `<div class='tt-linien'>${d[b].map((t) => `<div class='tt-linie'><span>${h(t.test)}</span>`
           + `<b class='tt-st'>${h(zahl(t.punkte))}</b></div>`).join("")}</div>`, unter(`a|${b}`)));
       return [aufklappbar("Total Technik", v.technik ? e.technik : null,

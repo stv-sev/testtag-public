@@ -104,10 +104,10 @@ class RanglisteDetails(unittest.TestCase):
         # Total Technik → Gerätetotale → Linien mit S und T
         self.assertIn("Total Technik 16.5 Boden 11.5 Synth Boden vorwärts S 5 T 7.5 Synth Boden rückwärts S 4 T 4 "
                       "Pferd 5 Synth Scheren S 5 T 5 Ringe – Synth Schwünge S – T –", text)
-        # Total Athletik → Total Kraft / Total Beweglichkeit → Einzeltests (fehlend „–“, Nullwert 0)
-        self.assertIn("Total Athletik 8 Total Kraft 8 Standweitsprung 8 Klettern / Hangeln am Tau –", text)
-        self.assertIn("Total Beweglichkeit 0 Bücke 0 Arm-Rumpf-Winkel rücklings –", text)
-        self.assertTrue(text.endswith("Seitspagat – Gesamt 24.5"))
+        # Total Athletik → Total Beweglichkeit / Total Kraft → Einzeltests (fehlend „–“, Nullwert 0)
+        self.assertIn("Total Athletik 8 Total Beweglichkeit 0 Bücke 0 Arm-Rumpf-Winkel rücklings –", text)
+        self.assertIn("Seitspagat – Total Kraft 8 Standweitsprung 8 Klettern / Hangeln am Tau –", text)
+        self.assertTrue(text.endswith("Liegestütz – Gesamt 24.5"))
 
     # ── Technik ──
     def test_technik_details_lines_with_s_and_line_points(self):

@@ -139,7 +139,7 @@ publizierte Startliste enthielt weder Stationsfolge noch Freigabegrenze (nur Hin
   Prüfsumme der Startlisten-Zeile. Erst ein Publisher-Lauf mit diesem Branch bringt das Feld in die Publikation;
   bis dahin zeigt „Gerät & Rotation“ „nicht verfügbar“.
 - **Gesamt gestuft** (statisch und Streamlit/Archiv gleich): nach dem Öffnen Total Technik, Total Athletik, Gesamt;
-  Total Technik → Gerätetotale → Linien S/T; Total Athletik → Total Kraft / Total Beweglichkeit → Einzeltests.
+  Total Technik → Gerätetotale → Linien S/T; Total Athletik → Total Beweglichkeit / Total Kraft → Einzeltests.
   Totale aus der Publikation, keine Rangberechnung; offene Stufen bleiben bei Aktualisierungen offen.
 - **Technik „Gerät & Rotation“** (statisch, `&art=technik&sicht=rotation&g=…&r=…`): Programm, Gerät (nur
   Technikstationen in Stationsfolge), Rotation 1 … `freigegeben`, AK optional. Zeigt die eingeteilte Riege in
@@ -159,7 +159,7 @@ Publikation enthält zurzeit 0 Live-Resultate; Noten-Darstellung daher nur synth
 
 **Offen:** Startreihenfolge innerhalb der Riege = Startliste (Positionen rotieren je Gerät nicht, falls das in der
 Praxis anders ist, fehlt die Angabe); Gerät & Rotation gibt es nur statisch (Streamlit-Rückfall: siehe unten);
-Reihenfolge in Gesamt Kraft vor Beweglichkeit wie im Auftrag, in der Ebene Athletik weiterhin Beweglichkeit zuerst.
+Reihenfolge überall Beweglichkeit vor Kraft (Athletik = Beweglichkeit + Kraft; entschieden 14.10.2026).
 
 **Abschluss 14.10.2026:** Streamlit-Rückfall für „Gerät & Rotation“: Die Umleitung der statischen Seite
 (`rueckfall: true` oder Ranglisten nicht in `ansichten`) gibt `&art=` und bei Gerät & Rotation `&sicht=rotation` mit
@@ -205,7 +205,7 @@ Supabase-Antwortzeit Median 44–52 ms.
 
 - **Darstellung:** Portierung von `app.rang_karte` und `quelle.turner_details` (`docs/rangliste.js`): Programm, AK,
   Ebenen Gesamt/Technik/Athletik, kompakte Zeile (Rang, Turner, Verein, Total), Details erst nach Antippen;
-  Gesamt gestuft (Total Technik → Geräte → Linien, Total Athletik → Kraft/Beweglichkeit → Tests, Gesamt);
+  Gesamt gestuft (Total Technik → Geräte → Linien, Total Athletik → Beweglichkeit/Kraft → Tests, Gesamt);
   Technik je Gerät aufklappbar mit Linien S/T und „(Alternative)“ beim Sprung; Athletik je Test, Total
   Beweglichkeit/Kraft/Athletik. Gleiche CSS-Regeln wie `app.py`.
 - **Keine eigene Rangberechnung:** Reihenfolge, Ränge, Punkte und Totale stammen aus der Publikation. Wie in

@@ -546,8 +546,8 @@ Die Rangliste hat drei Ebenen (Gesamt, Technik, Athletik), je rangiert nach dem 
 bleiben wählbar. Die Liste zeigt kompakt Rang, Turner, Verein und Total. Erst nach Antippen erscheinen die Details:
 
 - **Gesamt (gestuft):** nach dem Öffnen nur Total Technik, Total Athletik und Gesamt. Total Technik klappt auf zu den
-  Gerätetotalen, jedes Gerät weiter zu den Linien mit S und T; Total Athletik klappt auf zu Total Kraft und Total
-  Beweglichkeit, diese weiter zu den Einzeltests. Beweglichkeit und Kraft zählen nur im Athletiktotal, auch wenn ein
+  Gerätetotalen, jedes Gerät weiter zu den Linien mit S und T; Total Athletik klappt auf zu Total Beweglichkeit und
+  Total Kraft (Athletik = Beweglichkeit + Kraft), diese weiter zu den Einzeltests. Beweglichkeit und Kraft zählen nur im Athletiktotal, auch wenn ein
   Krafttest organisatorisch an einem Gerät erfasst wird.
 - **Technik:** Total Technik und je Gerät ein einzeln aufklappbares Feld mit den Linien (S = gewertete SKS,
   T = Linienpunkte). Sprung AK9 heisst „Sprung 1“ / „Sprung 2“; bei AK10–AK12 erscheint die gewählte Alternative.

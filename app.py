@@ -589,9 +589,9 @@ def _geraete(d: dict) -> list[str]:
 
 
 def _details_gesamt(e: dict, d: dict, vorhanden: dict) -> str:
-    """Gestuft: Total Technik → Geräte → Linien; Total Athletik → Kraft/Beweglichkeit → Tests; Gesamt."""
+    """Gestuft: Total Technik → Geräte → Linien; Total Athletik → Beweglichkeit/Kraft → Tests; Gesamt."""
     athletik = []
-    for bereich in ("kraft", "beweglichkeit"):
+    for bereich in ("beweglichkeit", "kraft"):
         tests = "".join(f"<div class='tt-linie'><span>{_h(t['test'])}</span><b class='tt-st'>{_h(_zahl(t['punkte']))}</b>"
                         f"</div>" for t in d[bereich])
         athletik.append(_aufklappbar(f"Total {q.BEREICH_ATHLETIK_TEXT[bereich]}",
