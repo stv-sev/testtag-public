@@ -1,0 +1,21 @@
+# Hält das Supabase-Projekt (Free) wach: täglich eine kleine Leseanfrage mit dem öffentlichen
+# Publishable Key (derselbe wie in docs/config.js, durch RLS auf öffentliche Testtage beschränkt).
+name: Supabase wach halten
+
+on:
+  schedule:
+    - cron: "17 5 * * *"  # täglich 05:17 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  anstupsen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Leseanfrage
+        run: |
+          curl -fsS --retry 3 --retry-delay 20 -o /dev/null -w "HTTP %{http_code}\n" \
+            "https://lxljapebdcutlaaidtry.supabase.co/rest/v1/testtage?select=slug&limit=1" \
+            -H "apikey: sb_publishable_j9MGb4EU6J_afcu0vhAMkg_JybzHBKN"
