@@ -149,7 +149,8 @@ html.tt-beamer { color-scheme: dark; background: #06192A; }
 .tt-bliste { display: flex; flex-direction: column; gap: .25em; }
 .tt-bzeile { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .7fr) 4em 5.6em; align-items: center; gap: .8em;
              background: #0D2E45; border-left: .22em solid transparent; border-radius: .3em; padding: .25em .8em; }
-.tt-bzeile.tt-neu { background: #1B4466; border-left-color: #E6007E; }
+.tt-bzeile.tt-neu { background: #8A0050; border-left-color: #FF4FA8; }
+.tt-bzeile.tt-neu small, .tt-bzeile.tt-neu .tt-bs, .tt-bzeile.tt-neu .tt-bnote small { color: #FFD1E8; }
 .tt-btext strong, .tt-btext small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tt-btext strong { font-weight: 700; color: #fff; }
 .tt-btext small { font-size: .6em; color: #9FC3D6; }

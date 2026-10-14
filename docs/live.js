@@ -37,7 +37,7 @@
  *
  * Beamer (`&beamer=1`, immer Live; `&p=`, `&ak=`, `&g=` filtern wie sonst): dunkel, gross, ohne Bedienung, nur die
  * neuesten 8 Noten, ohne Scrollen (bei sehr flachem Bildschirm weniger). Noten, die während der Anzeige neu
- * erscheinen (oder korrigiert werden), sind eine Minute lang hervorgehoben. Der Bildschirm wird wach gehalten.
+ * erscheinen (oder korrigiert werden), sind 5 Sekunden lang magenta hervorgehoben. Der Bildschirm wird wach gehalten.
  */
 "use strict";
 (() => {
@@ -50,7 +50,7 @@
   const TAKT_UEBERSICHT = 60000;
   const MAX_LIVE = 300;
   const BEAMER_MAX = 8;        // Beamer: die neuesten 8 Noten (passt eine nicht ganz, wird sie ausgeblendet)
-  const NEU_MS = 60000;        // Beamer: so lange gilt eine Note als neu
+  const NEU_MS = 5000;         // Beamer: so lange ist eine neue Note magenta hervorgehoben
   const LIVE = "resultate_live";
   const RANGLISTE = "resultate_rangliste";
   const STARTLISTE = "startliste";
@@ -194,6 +194,7 @@
   const beamer = new URLSearchParams(location.search).get("beamer") === "1";
   const gesehen = new Map();   // Beamer: Ergebnis-ID|geaendert_am → erstmals gezeigt (ms; 0 = schon beim Start da)
   let wachSperre = null;       // Beamer: Wake Lock des Bildschirms
+  let neuUhr = null;           // Beamer: Neuzeichnen, wenn eine Hervorhebung endet
 
   function vergessen() {
     testtag = null; koepfe = new Map(); zeilen = new Map(); nachholen = true; angezeigt = "";
@@ -629,13 +630,19 @@
     el.unter.textContent = filterText;
     const jetzt = Date.now();
     const ersterLauf = !gesehen.size;
+    let rest = Infinity;         // bis die nächste Hervorhebung endet (ms)
     const zeilenHtml = resultate.slice(0, BEAMER_MAX).map((r) => {
       const k = `${r.ergebnis_id}|${r.geaendert_am}`;
       if (!gesehen.has(k)) gesehen.set(k, ersterLauf ? 0 : jetzt);
-      return beamerZeile(r, jetzt - gesehen.get(k) < NEU_MS);
+      const neu = jetzt - gesehen.get(k) < NEU_MS;
+      if (neu) rest = Math.min(rest, NEU_MS - (jetzt - gesehen.get(k)));
+      return beamerZeile(r, neu);
     });
     setzeInhalt(`<div class="tt-bliste">${zeilenHtml.join("")}</div>`, { n: resultate.length, erster: kurz(resultate[0]) });
     passeBeamer();
+    // Hervorhebung pünktlich beenden, nicht erst beim nächsten Takt
+    clearTimeout(neuUhr);
+    neuUhr = rest === Infinity ? null : setTimeout(zeichne, rest + 50);
   }
 
   function beamerZeile(r, neu) {
