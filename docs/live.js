@@ -38,6 +38,7 @@
  * Beamer (`&beamer=1`, immer Live; `&p=`, `&ak=`, `&g=` filtern wie sonst): dunkel, gross, ohne Bedienung, nur die
  * neuesten 8 Noten, ohne Scrollen (bei sehr flachem Bildschirm weniger). Noten, die während der Anzeige neu
  * erscheinen (oder korrigiert werden), sind 5 Sekunden lang magenta hervorgehoben. Der Bildschirm wird wach gehalten.
+ * Sperrbildschirm (nur Logo und Titel): Taste S oder Leertaste, `&sperre=1` startet gesperrt.
  */
 "use strict";
 (() => {
@@ -557,6 +558,7 @@
   function zeichne() {
     if (!testtag || testtag.status === "archiviert") return;
     el.titel.textContent = testtag.titel;
+    if (el.sperreTitel) el.sperreTitel.textContent = testtag.titel;
     document.title = `${testtag.titel} – ${TITEL[ansicht]}`;
     el.badge.innerHTML = badge(testtag.status);
     navigation();
@@ -666,6 +668,28 @@
       voll = voll || zl.getBoundingClientRect().bottom > window.innerHeight - 4;
       zl.hidden = voll;
     }
+  }
+
+  // Beamer-Sperrbildschirm: nur Logo und Titel. Taste S oder Leertaste schaltet um, `&sperre=1` startet gesperrt.
+  // Die Daten laden dahinter weiter, damit nach dem Entsperren sofort der aktuelle Stand steht.
+  function sperreEinrichten() {
+    const s = document.createElement("div");
+    s.className = "tt-sperre";
+    s.innerHTML = "<div class='tt-sperre-logo'><img src='logo_gross.png' alt='Turnsport Aargau'></div>"
+      + "<div class='tt-sperre-titel'></div>";
+    s.hidden = new URLSearchParams(location.search).get("sperre") !== "1";
+    document.body.append(s);
+    el.sperreTitel = s.querySelector(".tt-sperre-titel");
+    document.addEventListener("keydown", (e) => {
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !(e.key === " " || e.key.toLowerCase() === "s")) return;
+      e.preventDefault();
+      s.hidden = !s.hidden;
+      try {
+        const u = new URL(location.href);
+        if (s.hidden) u.searchParams.delete("sperre"); else u.searchParams.set("sperre", "1");
+        history.replaceState(null, "", u);  // Neuladen (F5) behält den Zustand
+      } catch { /* ohne Adresszeile weiter */ }
+    });
   }
 
   async function wachHalten() {
@@ -1051,6 +1075,7 @@
   window.addEventListener("offline", zeigeStatus);
   window.addEventListener("resize", passeBeamer);
   setInterval(zeigeStatus, 1000);
+  if (beamer) sperreEinrichten();
   wachHalten();
   takt();
 })();

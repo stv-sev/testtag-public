@@ -159,3 +159,9 @@ html.tt-beamer { color-scheme: dark; background: #06192A; }
 .tt-bnote { text-align: right; font-size: 1.45em; font-weight: 700; color: #fff; white-space: nowrap;
             font-variant-numeric: tabular-nums; }
 .tt-bnote small { font-size: .42em; font-weight: 600; color: #9FC3D6; margin-right: .35em; }
+/* Beamer-Sperrbildschirm (Taste S oder Leertaste): nur Logo und Titel, über allem */
+.tt-sperre { position: fixed; inset: 0; z-index: 10; background: #06192A; display: flex; flex-direction: column;
+             align-items: center; justify-content: center; gap: 1.2em; padding: 1em; text-align: center; }
+.tt-sperre-logo { background: #fff; border-radius: .5em; padding: .9em 1.5em; line-height: 0; }
+.tt-sperre-logo img { width: min(50vw, 95vh); height: auto; }
+.tt-sperre-titel { font-size: 1.5em; font-weight: 700; color: #fff; max-width: 90vw; line-height: 1.2; }
