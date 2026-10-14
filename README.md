@@ -567,5 +567,6 @@ Jede Zeile `startliste` enthält `inhalt.rotation` = `{stationsfolge: [{station,
 rotationen, freigegeben}`: die Stationen in der Reihenfolge von `tab_startgeraet` und die geprüfte Freigabegrenze
 (`Public!B5`). Die Riege mit Startgerät an Position *i* steht in Rotation *r* an Station (*i* + *r* − 1) mod *n*
 (gleich wie `id_rotation` der Noteneingabe). Daraus zeigt die statische Seite unter Technik „Gerät & Rotation“; ältere
-Stände ohne `rotation` zeigen dort nur einen Hinweis.
+Stände ohne `rotation` zeigen dort nur einen Hinweis. Im Streamlit-Rückfall gibt es diese Sicht nicht: Streamlit zeigt einen Hinweis und die
+Technik-Rangliste.
 

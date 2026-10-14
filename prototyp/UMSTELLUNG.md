@@ -46,8 +46,16 @@ Reihenfolge, Ziele, Stand/Adresse; 390 und 1280 px), Übersicht → Testtag → 
 Publikation enthält zurzeit 0 Live-Resultate; Noten-Darstellung daher nur synthetisch geprüft.
 
 **Offen:** Startreihenfolge innerhalb der Riege = Startliste (Positionen rotieren je Gerät nicht, falls das in der
-Praxis anders ist, fehlt die Angabe); Gerät & Rotation gibt es nur statisch (nicht im Streamlit-Rückfall);
+Praxis anders ist, fehlt die Angabe); Gerät & Rotation gibt es nur statisch (Streamlit-Rückfall: siehe unten);
 Reihenfolge in Gesamt Kraft vor Beweglichkeit wie im Auftrag, in der Ebene Athletik weiterhin Beweglichkeit zuerst.
+
+**Abschluss 14.10.2026:** Streamlit-Rückfall für „Gerät & Rotation“: Die Umleitung der statischen Seite
+(`rueckfall: true` oder Ranglisten nicht in `ansichten`) gibt `&art=` und bei Gerät & Rotation `&sicht=rotation` mit
+(Gerät/Rotation entfallen). Streamlit übernimmt die Ebene einmal, wählt bei `sicht=rotation` die Technik-Rangliste und
+zeigt den Hinweis „«Gerät & Rotation» ist in dieser Ansicht nicht verfügbar. Angezeigt wird die Technik-Rangliste …“;
+danach entfernt es die Angaben aus der Adresse, die Ebene bleibt frei wählbar (Wechsel blendet den Hinweis aus).
+Zeitabhängiger App-Test behoben: jeder Test beginnt am Anfang eines 300-s-Kontrollfensters (vorher löste eine zufällig
+überschrittene Fenstergrenze eine zusätzliche Kontrollladung aus – `2 != 1`; 10 s vor der Grenze reproduzierbar).
 
 ## Nachtrag 13.10.2026 abends: alle vier Ansichten und Übersicht statisch
 

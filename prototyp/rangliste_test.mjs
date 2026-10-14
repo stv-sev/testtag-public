@@ -524,6 +524,20 @@ for (const [extra, ziel] of [["&ansicht=rangliste&ak=AK+7", "rangliste"], ["&ans
   pruefe(page.url() === `${STREAMLIT}/?t=${SLUG}&ansicht=${ziel}` && sb.anfragen.length === vor, `Rückfall → Streamlit ${ziel} ohne Datenabruf`);
   await ctx.close();
 }
+// Rückfall aus „Gerät & Rotation“: Streamlit erhält Technik + sicht=rotation (dort Hinweis), Gerät/Rotation entfallen
+for (const [extra, zusatz, config] of [
+  ["&ansicht=rangliste&p=AK5-AK9%2B&art=technik&sicht=rotation&g=Boden&r=2", "&art=technik&sicht=rotation", { rueckfall: true, ansichten: ["rangliste", "startliste", "zeitplan"] }],
+  ["&ansicht=rangliste&art=technik&sicht=rotation&g=Boden&r=2", "&art=technik&sicht=rotation", { rueckfall: false, ansichten: ["startliste", "zeitplan"] }],
+  ["&ansicht=rangliste&art=athletik&sicht=rotation", "&art=athletik", { rueckfall: true, ansichten: ["rangliste"] }],
+  ["&ansicht=rangliste&art=<x>&sicht=rotation", "", { rueckfall: true, ansichten: ["rangliste"] }]]) {
+  const { ctx, page } = await kontext({ width: 390, height: 844 }, true, config);
+  const vor = sb.anfragen.length;
+  await page.goto(adresse(extra));
+  await page.waitForURL((x) => x.href.startsWith(STREAMLIT));
+  pruefe(page.url() === `${STREAMLIT}/?t=${SLUG}&ansicht=rangliste${zusatz}` && sb.anfragen.length === vor,
+    `Rückfall ${extra} → Streamlit-Rangliste${zusatz || " (ohne Ebene)"} ohne Datenabruf`);
+  await ctx.close();
+}
 await browser.close();
 pruefe(sb.anfragen.every((a) => a.key && a.key.startsWith("sb_publishable_")), `nur Publishable Key (${sb.anfragen.length} Anfragen)`);
 writeFileSync(ausgabe, JSON.stringify(gezeichnet));

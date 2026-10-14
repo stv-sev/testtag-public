@@ -54,13 +54,16 @@ class AppTests(unittest.TestCase):
         uhr = mock.patch("time.time", new=lambda: echte_zeit() + self.versatz)
         uhr.start()
         self.addCleanup(uhr.stop)
-        self.api = FakeOeffentlich(self.data["testtage"], self.data["rows"], self.data["snapshots"])
+        # Jeder Test beginnt am Anfang eines Kontrollfensters (300 s): sonst lädt eine zufällig überschrittene
+        # Fenstergrenze den Stand zusätzlich und Zählungen der Abrufe schwanken.
+        self.ausrichten(300)
+        self.api =FakeOeffentlich(self.data["testtage"], self.data["rows"], self.data["snapshots"])
         patcher = mock.patch.object(q, "https_transport", self.api)
         patcher.start()
         self.addCleanup(patcher.stop)
 
     def app(self, t: str | None = None, secrets: dict | None = None, ansicht: str | None = None,
-            live_url: str | None = None, statische_bereiche=None) -> AppTest:
+            live_url: str | None = None, statische_bereiche=None, adresse: dict | None = None) -> AppTest:
         at = AppTest.from_file(APP, default_timeout=60)
         for key, value in (secrets or {"supabase_url": "https://example-ref.supabase.co",
                                        "supabase_publishable_key": TEST_PUBLISHABLE_KEY}).items():
@@ -73,6 +76,8 @@ class AppTests(unittest.TestCase):
             at.query_params["t"] = t
         if ansicht:
             at.query_params["ansicht"] = ansicht
+        for key, value in (adresse or {}).items():
+            at.query_params[key] = value
         at.run()
         self.assertEqual(len(at.exception), 0, [e.value for e in at.exception])
         return at
@@ -398,6 +403,40 @@ class AppTests(unittest.TestCase):
         self.assertIn("Alle Rotationen freigegeben.", self.text(at))  # Hinweis des Publishers
         self.assertEqual(len(at.dataframe), 0)
         self.assert_clean(at)
+
+    def test_rotation_view_falls_back_to_technik_ranking_with_hint(self):
+        """Rückfall: „Gerät & Rotation“ der statischen Seite gibt es hier nicht – Hinweis und Technik-Rangliste."""
+        at = self.app(TT_SLUG, ansicht="rangliste", adresse={"p": AK5, "art": "technik", "sicht": "rotation",
+                                                             "g": "Boden", "r": "3"})
+        self.assertEqual(at.radio(key="bereich").value, q.RANGLISTE)
+        self.assertEqual(at.radio(key="rl_art").value, "technik")
+        hinweis = [i.value for i in at.info]
+        self.assertEqual(len(hinweis), 1, hinweis)
+        self.assertTrue(hinweis[0].startswith("«Gerät & Rotation» ist in dieser Ansicht nicht verfügbar. Angezeigt "
+                                              "wird die Technik-Rangliste"), hinweis)
+        self.assertTrue(self.raenge(at))  # normale Technik-Rangliste mit Rängen
+        self.assertFalse({"art", "sicht", "g", "r"} & set(at.query_params))  # einmal übernommen, Ebene frei wählbar
+        self.versatz += 5
+        at.run()  # Takt: Hinweis und Technik bleiben
+        self.assertEqual(at.radio(key="rl_art").value, "technik")
+        self.assertEqual([i.value for i in at.info], hinweis)
+        at.radio(key="rl_art").set_value("gesamt").run()  # Ebene frei wählbar, Hinweis erledigt
+        self.assertEqual(at.radio(key="rl_art").value, "gesamt")
+        self.assertEqual([i.value for i in at.info], [])
+        at.radio(key="rl_art").set_value("technik").run()
+        self.assertEqual([i.value for i in at.info], [])
+        self.assert_clean(at)
+        for adresse, ebene in (({"art": "athletik"}, "athletik"), ({"art": "athletik", "sicht": "rotation"}, "athletik"),
+                               ({"art": "unbekannt", "sicht": "rotation"}, "gesamt")):
+            with self.subTest(adresse=adresse):
+                at = self.app(TT_SLUG, ansicht="rangliste", adresse=adresse)
+                self.assertEqual(at.radio(key="rl_art").value, ebene)
+                self.assertEqual([i.value for i in at.info], [])
+        basis = "https://stv-sev.github.io/testtag-public/"  # Rangliste statisch: Adresse bleibt für die Seite
+        at = self.app(TT_SLUG, ansicht="rangliste", live_url=basis, statische_bereiche=["rangliste"],
+                      adresse={"art": "technik", "sicht": "rotation"})
+        self.assertEqual(at.query_params["sicht"], ["rotation"])
+        self.assertEqual([i.value for i in at.info], [])
 
     # ── Startliste und Zeitplan ──
     def test_startliste_grouped_by_program_and_apparatus_with_five_columns(self):

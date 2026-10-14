@@ -10,6 +10,8 @@ Adressen:
 - `?t=<uuid>`: ältere Links mit der Testtag-UUID werden weiterhin aufgelöst und auf den Slug umgestellt;
 - `&ansicht=live|rangliste|startliste|zeitplan`: öffnet diesen Bereich (Links aus der statischen Live-Ansicht);
   ein Bereichswechsel schreibt ihn in die Adresse. Filter (Programm, AK) stehen bewusst nicht in der Adresse.
+- `&art=gesamt|technik|athletik` (Umleitung der statischen Seite): wählt einmal die Ranglistenebene;
+  `&sicht=rotation` ("Gerät & Rotation" gibt es nur statisch) zeigt einen Hinweis und die Technik-Rangliste.
 
 Statische Live-Ansicht (optional, Secret `live_url`, z. B. `https://stv-sev.github.io/testtag-public/`): Ist sie
 hinterlegt, führt „← Alle Testtage“ auf deren Übersicht und „Live“ bei nicht archivierten Testtagen auf `live_url?t=<slug>`; Streamlit zeigt dann nur
@@ -344,7 +346,30 @@ def _bereich_aus_adresse(bereiche: list[str]) -> None:
         st.session_state.pop("bereich", None)
 
 
+ROTATION_HINWEIS = ("«Gerät & Rotation» ist in dieser Ansicht nicht verfügbar. Angezeigt wird die Technik-Rangliste; "
+                    "unter «Rangliste» lässt sich die Ebene wechseln.")
+
+
+def _rangliste_aus_adresse(bereiche: list[str]) -> None:
+    """`&art=` (Umleitung der statischen Seite) wählt die Ebene einmal; `&sicht=rotation` gibt es hier nicht: Technik
+    mit Hinweis. Die Angaben werden danach aus der Adresse entfernt, damit die Ebene frei wählbar bleibt."""
+    if q.RANGLISTE not in bereiche or not any(k in st.query_params for k in ("art", "sicht", "g", "r")):
+        return
+    art = str(st.query_params.get("art", "") or "").strip()
+    rotation = art == "technik" and str(st.query_params.get("sicht", "") or "").strip() == "rotation"
+    if art in q.RANGLISTEN:
+        st.session_state["rl_art"] = art
+    st.session_state["rl_rotation"] = rotation
+    for k in ("art", "sicht", "g", "r"):
+        st.query_params.pop(k, None)
+
+
+def _rotation_vergessen() -> None:
+    st.session_state.pop("rl_rotation", None)
+
+
 def _ansicht_merken() -> None:
+    _rotation_vergessen()
     bereich = st.session_state.get("bereich")
     if bereich in ANSICHT_PARAM:
         st.query_params["ansicht"] = ANSICHT_PARAM[bereich]
@@ -620,6 +645,8 @@ def rang_karte(e: dict, art: str, eigene: list[dict], details: dict | None) -> s
 
 
 def _ranglisten(stand) -> None:
+    if st.session_state.get("rl_rotation"):
+        st.info(ROTATION_HINWEIS)
     programme = q.programme(stand, q.RANGLISTE)
     if not programme:
         leer("Es ist noch keine Rangliste veröffentlicht.")
@@ -630,7 +657,7 @@ def _ranglisten(stand) -> None:
     with spalten[1]:
         ak = _auswahl("Altersklasse", q.altersklassen(stand, q.RANGLISTE, programm), "rl_ak")
     art = st.radio("Rangliste", q.RANGLISTEN, horizontal=True, key="rl_art",
-                   format_func=lambda a: q.RANGLISTE_TEXT[a])
+                   format_func=lambda a: q.RANGLISTE_TEXT[a], on_change=_rotation_vergessen)
     hinweis = q.hinweis(stand, q.RANGLISTE, programm, ak)
     eintraege = q.rangliste(stand, programm, ak, art)
     if not eintraege:
@@ -784,6 +811,7 @@ def zeichne() -> None:
     links = statische_links(testtag)
     bereiche = _bereiche(links)
     _bereich_aus_adresse(bereiche)
+    _rangliste_aus_adresse(bereiche)
     if links and st.session_state.get("bereich") not in bereiche:  # Bereich auf der statischen Seite: nichts laden
         navigation(bereiche, links)
         live_verweis(links)

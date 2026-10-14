@@ -446,6 +446,16 @@
     return `${z.streamlit}/?t=${encodeURIComponent(slug)}${ziel ? `&ansicht=${encodeURIComponent(ziel)}` : ""}`;
   }
 
+  // Umleitung in die Streamlit-Rangliste: Ebene mitgeben; „Gerät & Rotation“ gibt es dort nicht – Streamlit zeigt
+  // dann einen Hinweis und die Technik-Rangliste (Gerät/Rotation entfallen).
+  function ranglistenZusatz(ziel) {
+    if (ziel !== "rangliste") return "";
+    const a = new URLSearchParams(location.search);
+    const ebene = ["technik", "athletik"].includes(a.get("art")) ? a.get("art") : null;
+    if (!ebene) return "";
+    return `&art=${ebene}${ebene === "technik" && a.get("sicht") === "rotation" ? "&sicht=rotation" : ""}`;
+  }
+
   // Link innerhalb dieser Seite (gleicher Testtag, aktuelle Auswahl).
   function eigenerLink(ziel) {
     const u = new URL(location.href);
@@ -869,8 +879,8 @@
   const nurStreamlit = !!z && ANSICHTEN.includes(gewuenscht) && !z.ansichten.has(gewuenscht);
   if (z && z.streamlit && (z.rueckfall || nurStreamlit)) {
     // Rückfall oder hier nicht angebotene Ansicht: bisherige Anzeige in Streamlit, vor jedem Datenabruf
-    location.replace(slug && SLUG.test(slug) ? streamlitLink(ANSICHTEN.includes(gewuenscht) ? gewuenscht : "live")
-      : `${z.streamlit}/`);
+    const ziel = ANSICHTEN.includes(gewuenscht) ? gewuenscht : "live";
+    location.replace(slug && SLUG.test(slug) ? streamlitLink(ziel) + ranglistenZusatz(ziel) : `${z.streamlit}/`);
     return;
   }
   if (!z) {
