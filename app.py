@@ -408,7 +408,7 @@ def uebersicht(zugang) -> None:
                       width="stretch")
             link = statische_links(testtag).get(q.LIVE)
             _html([f"<div class='tt-meta'>{_badge(status)} &nbsp;Stand "
-                   f"{_h(q.zeit_text(testtag.stand_am, mit_datum=True))} · Adresse ?t={_h(testtag.slug)}"
+                   f"{_h(q.zeit_text(testtag.stand_am, mit_datum=True))}"
                    f"{_live_pille(link, 'Live-Resultate') if link else ''}</div>"])
 
 

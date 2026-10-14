@@ -139,7 +139,7 @@ class AppTests(unittest.TestCase):
         self.assertIn("Synthetischer Testtag 2025 – Archivhausen", labels)
         self.assertNotIn("Nicht öffentlich", labels)
         text = self.text(at)
-        self.assertIn(f"?t={TT_SLUG}", text)
+        self.assertNotIn("Adresse ?t=", text)
         roh = self.roh(at)
         for klasse in ("tt-badge live", "tt-badge demnaechst", "tt-badge archiv"):
             self.assertIn(klasse, roh)

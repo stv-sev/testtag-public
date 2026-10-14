@@ -888,7 +888,7 @@
         const [klasse, text] = KURZ_BADGE[status];
         teile.push(`<a class='tt-testtag' href="${h(ziel)}">${h(t.titel)}</a>`
           + `<div class='tt-meta'><span class="tt-badge ${klasse}">${klasse === "live" ? "<span class='tt-punkt'></span>" : ""}`
-          + `${text}</span> &nbsp;Stand ${h(zeitText(t.stand_am, true))} · Adresse ?t=${h(t.slug)}</div>`);
+          + `${text}</span> &nbsp;Stand ${h(zeitText(t.stand_am, true))}</div>`);
       }
     }
     setzeInhalt(teile.join(""), { n: tage.length, uebersicht: true, slugs: tage.map((t) => t.slug).join(",") });
