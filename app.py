@@ -224,7 +224,7 @@ def _zahl(wert) -> str:
 
 
 def _programm(name: str) -> str:
-    return q.PROGRAMM_TEXT.get(name, name)
+    return q.programm_text(name)
 
 
 def _html(teile) -> None:

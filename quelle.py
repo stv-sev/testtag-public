@@ -42,7 +42,7 @@ if _SRC.is_dir() and str(_SRC) not in sys.path:  # lokal aus dem Projektstamm un
 
 from testtag_public.archive import ArchiveFormatError, verify_archive, verify_snapshot_row  # noqa: E402
 from testtag_public.publication_model import (  # noqa: E402
-    PROGRAM_ORDER, SCHEMA_VERSION, content_checksum, number_out, sort_live,
+    SCHEMA_VERSION, content_checksum, number_out, sort_live,
 )
 
 ZEITUEBERSCHREITUNG = 5.0
@@ -63,7 +63,9 @@ STATUS_REIHENFOLGE = ("live", "vorbereitet", "archiviert")
 STATUS_TEXT = {"live": "Live", "vorbereitet": "Vorbereitet", "archiviert": "Archiv"}
 RANGLISTEN = ("gesamt", "technik", "athletik")
 RANGLISTE_TEXT = {"gesamt": "Gesamt", "technik": "Technik", "athletik": "Athletik"}
-PROGRAMM_TEXT = {"AK5-AK9+": "AK5–AK9+", "AK9-AK12": "AK9–AK12"}
+def programm_text(programm: str) -> str:
+    """Programm bzw. Subdivision so, wie in Excel (Public!B4/B9) geschrieben; nur „-“ vor „AK“ wird zum Gedankenstrich."""
+    return re.sub(r"-(?=AK)", "–", programm or "")
 BEREICH_ATHLETIK_TEXT = {"beweglichkeit": "Beweglichkeit", "kraft": "Kraft"}
 
 SLUG_MUSTER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")  # wie testtage_slug_check im Schema
@@ -416,7 +418,9 @@ def lade_archiv(zugang: Zugang, testtag: Testtag, *, transport=None, jetzt: Opti
 # ── Auswahl (reine Anzeigelogik, keine Fachberechnung) ───────────────────────────────────────────────
 
 def _programm_rang(programm: str) -> tuple:
-    return (PROGRAM_ORDER.index(programm) if programm in PROGRAM_ORDER else len(PROGRAM_ORDER), programm)
+    """Programme (auch Subdivisionen wie „AK5–AK7“) nach der ersten AK-Zahl, dann nach Name."""
+    zahl = re.search(r"\d+", programm or "")
+    return (int(zahl.group()) if zahl else 999, programm)
 
 
 def _ak_rang(ak: str) -> tuple:

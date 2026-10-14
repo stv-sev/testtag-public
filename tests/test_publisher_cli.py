@@ -12,7 +12,7 @@ from unittest import mock
 
 import _support
 from _support import (AK5, AK9, TEST_ENV, TEST_PUBLISHABLE_KEY, TEST_SECRET_KEY, TT_SECRET_MARKERS, TT_SLUG,
-                      FakeDataApi, make_testtag_workbook)
+                      FakeDataApi, make_testtag_workbook, testtag_spec)
 
 from testtag_public import publisher
 from testtag_public.excel_publication import load_publication_state
@@ -51,6 +51,42 @@ class PublisherCliTests(unittest.TestCase):
     def assert_safe(self, text: str) -> None:
         for marker in self.sensitive():
             self.assertNotIn(marker, text)
+
+    def subdivisionen(self) -> list[Path]:
+        people = testtag_spec(AK5)["participants"]
+        return [make_testtag_workbook(self.dir / "ak5-a.xlsx", AK5, public={"subdivision": "AK5–AK6"},
+                                      participants=[x for x in people if x[5] == "AK 6"]),
+                make_testtag_workbook(self.dir / "ak5-b.xlsx", AK5, public={"subdivision": "AK7"},
+                                      participants=[x for x in people if x[5] == "AK 7"]),
+                self.ak9]
+
+    def run_argv(self, argv, env=None):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        code = publisher.run([*argv, "--stability-seconds", "0"], env={} if env is None else env,
+                             transport=no_transport, sleep=lambda _s: None, now=lambda: FIXED, stdout=stdout,
+                             stderr=stderr)
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_any_number_of_workbooks_for_subdivisions(self):
+        mappen = self.subdivisionen()
+        for quelle, argv, env in (
+                ("--workbook", [x for m in mappen for x in ("--workbook", str(m))], {}),
+                ("TESTTAG_WORKBOOKS", [], {"TESTTAG_WORKBOOKS": ";".join(str(m) for m in mappen)})):
+            with self.subTest(quelle=quelle):
+                code, out, err = self.run_argv(argv, env)
+                self.assertEqual(code, 0, err)
+                self.assertIn("Programm:            AK5–AK6 (Freigabe ja, Rotation 8/8)", out)
+                self.assertIn("Programm:            AK7 (Freigabe ja, Rotation 8/8)", out)
+                self.assertIn("Programm:            AK9-AK12", out)
+                self.assertIn("Status:              Probelauf – nichts geschrieben", out)
+        code, _out, err = self.run_argv(["--workbook", str(mappen[0]), "--workbook-ak9", str(self.ak9)])
+        self.assertEqual(code, 2)
+        self.assertIn("--workbook nicht zusammen mit", err)
+        env = {"TESTTAG_WORKBOOKS": str(mappen[0]), "TESTTAG_WORKBOOK_AK9_AK12": str(self.ak9)}
+        code, _out, err = self.run_argv([], env)
+        self.assertEqual(code, 5)
+        self.assertIn("nicht gemeinsam", err)
+        self.assert_safe(err)
 
     def test_default_is_a_dry_run_without_network(self):
         with mock.patch.object(socket.socket, "connect", side_effect=AssertionError("Netzwerk")):

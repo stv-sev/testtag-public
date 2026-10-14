@@ -14,6 +14,9 @@
 Konfiguration: Die lokale `.env` im Projektstamm wird automatisch geladen (Prozessvariablen haben Vorrang).
 Ohne `--workbook-ak5/--workbook-ak9` gelten TESTTAG_WORKBOOK_AK5_AK9PLUS und TESTTAG_WORKBOOK_AK9_AK12.
 
+Mehr als zwei Arbeitsmappen (Subdivisionen eines Programms, Public!B9): `--workbook <Mappe>` mehrfach angeben bzw.
+TESTTAG_WORKBOOKS="<Mappe>;<Mappe>;…". Programm bzw. Subdivision steht dann in der Mappe selbst.
+
 Ausgaben laufen ausschliesslich über `SafeReport`: Event-Slug, Programme, AK-Bezeichnungen, Anzahlen,
 Bereiche, gekürzte Prüfsummen, HTTP-Status und stabile Fehlercodes – keine Namen, Vereine, Jahrgänge,
 Teilnehmerschlüssel, Einzelwertungen, Inhalte, Request-Bodies, Schlüssel oder vollständigen Pfade.
@@ -97,6 +100,9 @@ def build_parser() -> argparse.ArgumentParser:
                                                f"(Standard: {local_config.ENV_WORKBOOK_AK5})")
     parser.add_argument("--workbook-ak9", help="Arbeitsmappe des Programms AK9-AK12 "
                                                f"(Standard: {local_config.ENV_WORKBOOK_AK9})")
+    parser.add_argument("--workbook", action="append", metavar="MAPPE",
+                        help="Arbeitsmappe (mehrfach; statt --workbook-ak5/--workbook-ak9, z. B. für Subdivisionen; "
+                             f"Standard: {local_config.ENV_WORKBOOKS})")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--publish", action="store_true",
                       help="Wirklich nach Supabase schreiben (verlangt --confirm-slug und Konfiguration)")
@@ -132,6 +138,26 @@ def _check_program(source, expected: str, option: str) -> None:
                                                           f"(Public!B4); nichts geschrieben.")])
 
 
+def _quellen(args, env) -> list[tuple[str, Path, Optional[str]]]:
+    """Arbeitsmappen als (Option, Pfad, erwartetes Programm); Aufrufoptionen vor `.env`."""
+    if args.workbook:
+        if args.workbook_ak5 or args.workbook_ak9:
+            raise UsageError("--workbook nicht zusammen mit --workbook-ak5/--workbook-ak9 angeben.")
+        return [("--workbook", Path(p), None) for p in args.workbook]
+    if args.workbook_ak5 or args.workbook_ak9:
+        default_ak5, default_ak9 = local_config.workbook_paths(env)
+        quellen = [("--workbook-ak5", args.workbook_ak5 or default_ak5, "AK5-AK9+"),
+                   ("--workbook-ak9", args.workbook_ak9 or default_ak9, "AK9-AK12")]
+    else:
+        quellen = [(f"--workbook-ak5" if p == "AK5-AK9+" else "--workbook-ak9" if p == "AK9-AK12" else "--workbook",
+                    path, p) for _k, path, p in local_config.workbook_sources(env)]
+    if not all(path for _o, path, _p in quellen):
+        raise UsageError("Arbeitsmappen fehlen: --workbook-ak5/--workbook-ak9 (bzw. --workbook) angeben oder "
+                         f"{local_config.ENV_WORKBOOK_AK5}/{local_config.ENV_WORKBOOK_AK9} "
+                         f"(bzw. {local_config.ENV_WORKBOOKS}) konfigurieren.")
+    return [(o, Path(path), p) for o, path, p in quellen]
+
+
 def run(
     argv: Optional[list[str]] = None,
     *,
@@ -164,19 +190,15 @@ def run(
             raise UsageError("--publish/--archive/--hide verlangt --confirm-slug <Event-Slug>.")
         if args.confirm_archive != args.archive:
             raise UsageError("--archive und --confirm-archive sind nur gemeinsam zulässig; nichts archiviert.")
-        default_ak5, default_ak9 = local_config.workbook_paths(env)
-        paths = (args.workbook_ak5 or default_ak5, args.workbook_ak9 or default_ak9)
-        if not all(paths):
-            raise UsageError("Arbeitsmappen fehlen: --workbook-ak5/--workbook-ak9 angeben oder "
-                             f"{local_config.ENV_WORKBOOK_AK5}/{local_config.ENV_WORKBOOK_AK9} konfigurieren.")
+        quellen = _quellen(args, env)
         # Konfiguration vor dem Lesen prüfen; im Probelauf werden keine Variablen benötigt.
         config = db.load_config(env) if writing else None
 
         sources = []
-        for option, path, program in (("--workbook-ak5", paths[0], "AK5-AK9+"),
-                                      ("--workbook-ak9", paths[1], "AK9-AK12")):
+        for option, path, program in quellen:
             source = read_program_source(Path(path), wait_seconds=args.stability_seconds, sleep=sleep)
-            _check_program(source, program, option)
+            if program is not None:
+                _check_program(source, program, option)
             sources.append(source)
         observed = now()
         state = build_state(sources, observed_at=observed)

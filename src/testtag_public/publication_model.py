@@ -90,6 +90,7 @@ class Code:
     WERT_UNGUELTIG = "WERT_UNGUELTIG"
     STRUKTUR_UNGUELTIG = "STRUKTUR_UNGUELTIG"
     EINTEILUNG_UNGUELTIG = "EINTEILUNG_UNGUELTIG"
+    SUBDIVISION_UNGUELTIG = "SUBDIVISION_UNGUELTIG"
 
 
 @dataclass(frozen=True)
@@ -320,6 +321,14 @@ class Participant:
         return {"teilnehmer": self.key, "name": self.name, "vorname": self.vorname, "verein": self.verein}
 
 
+def public_program_name(source: ProgramSource) -> str:
+    """Öffentlicher Programmname: Subdivision (Public!B9), sonst das Programm (Public!B4)."""
+    return clean_text(source.public.get("subdivision")) or clean_text(source.public.get("program"))
+
+
+_SUBDIVISION = re.compile(r"^[^\x00-\x1f]{1,40}$")
+
+
 @dataclass
 class ProgramResult:
     definition: ProgramDefinition
@@ -331,6 +340,7 @@ class ProgramResult:
     results: list[dict]  # sichtbare Einzelwertungen (öffentlich, ohne geaendert_am)
     diagnose: dict
     einteilung: dict = field(default_factory=dict)  # (Rotation, Gerät) → [(Startposition, Excel-ID)]
+    name: str = ""  # öffentlicher Programmname (Subdivision oder Programm)
 
 
 def validate_public(source: ProgramSource, issues: Issues) -> Optional[tuple[ProgramDefinition, int, bool, dict]]:
@@ -435,8 +445,8 @@ def _line_map(src: ProgramSource) -> dict[tuple[int, int], LineDefinition]:
 
 
 def _validate_participants(src: ProgramSource, definition: ProgramDefinition, slug: str,
-                           issues: Issues) -> dict[int, Participant]:
-    name = definition.name
+                           issues: Issues, programm: Optional[str] = None) -> dict[int, Participant]:
+    name = programm or definition.name
     stations = {s.name for s in src.stations}
     by_id: dict[int, Participant] = {}
     for raw in src.participants:
@@ -600,11 +610,12 @@ def evaluate_program(src: ProgramSource, slug: str, issues: Issues) -> Optional[
         return None
     definition, rotation_max, active, modes = checked
     _validate_structure(src, definition, issues)
-    people = _validate_participants(src, definition, slug, issues)
+    name = public_program_name(src) if _SUBDIVISION.match(public_program_name(src)) else definition.name
+    people = _validate_participants(src, definition, slug, issues, name)
     einteilung = _validate_einteilung(src, definition, people, issues)
     lines = _line_map(src)
     codes = {s.name: s.geraet_code for s in src.stations}
-    prog = definition.name
+    prog = name
 
     diag = {
         "technik": Counter(), BEREICH_BEWEGLICHKEIT: Counter(), BEREICH_KRAFT: Counter(),
@@ -754,7 +765,8 @@ def evaluate_program(src: ProgramSource, slug: str, issues: Issues) -> Optional[
     if definition.sprung_regel:
         diagnose["sprung"] = {"ak9_quellen": dict(sorted(diag["sprung_ak9"].items())),
                               "ak10_12_ohne_alternative": diag["sprung_ohne_alternative"]}
-    return ProgramResult(definition, src, rotation_max, active, modes, participants, results, diagnose, einteilung)
+    return ProgramResult(definition, src, rotation_max, active, modes, participants, results, diagnose, einteilung,
+                         name)
 
 
 def _noten_row(src: ProgramSource, excel_id: int) -> str:
@@ -898,11 +910,36 @@ def _validate_event(sources: list[ProgramSource], issues: Issues) -> tuple[str, 
     if len(titles) != 1:
         issues.add(Code.EVENT_WIDERSPRUCH, "Public!B3 (Titel) unterscheidet sich zwischen den Arbeitsmappen.")
     programs = Counter(s.public.get("program") for s in sources)
-    for program, count in programs.items():
+    names = Counter(public_program_name(s) for s in sources)
+    for s in sources:
+        sub = s.public.get("subdivision")
+        if sub is not None and (not isinstance(sub, str) or not _SUBDIVISION.match(clean_text(sub))):
+            issues.add(Code.SUBDIVISION_UNGUELTIG, f"{s.source.filename}: Public!B9 (subdivision) muss ein Text mit "
+                                                   f"höchstens 40 Zeichen sein.")
+        elif programs[s.public.get("program")] > 1 and not clean_text(sub):
+            issues.add(Code.PROGRAMM_DOPPELT, f"Programm {s.public.get('program')} kommt mehrfach vor: jede Mappe "
+                                              f"braucht dann eine eigene Subdivision (Public!B9).")
+    for name, count in names.items():
         if count > 1:
-            issues.add(Code.PROGRAMM_DOPPELT, f"Programm {program} kommt mehrfach vor.")
+            issues.add(Code.PROGRAMM_DOPPELT, f"Programm bzw. Subdivision {name} kommt mehrfach vor.")
     issues.raise_if_any()
     return next(iter(slugs)), next(iter(titles))
+
+
+def _validate_subdivisions(programs: list[ProgramResult], issues: Issues) -> None:
+    """Subdivisionen eines Programms: jede AK steht in genau einer (sonst wäre die Rangliste der AK geteilt)."""
+    by_definition: dict[str, list[ProgramResult]] = defaultdict(list)
+    for p in programs:
+        by_definition[p.definition.name].append(p)
+    for definition, parts in sorted(by_definition.items()):
+        seen: dict[str, str] = {}
+        for p in parts:
+            for ak in sorted({x.ak for x in p.participants}):
+                if ak in seen and seen[ak] != p.name:
+                    issues.add(Code.SUBDIVISION_UNGUELTIG, f"{definition}: {ak} kommt in den Subdivisionen {seen[ak]} "
+                                                           f"und {p.name} vor; eine AK muss ganz in einer Subdivision "
+                                                           f"stehen.")
+                seen.setdefault(ak, p.name)
 
 
 def build_state(sources: list[ProgramSource], *, observed_at: datetime | str,
@@ -912,8 +949,11 @@ def build_state(sources: list[ProgramSource], *, observed_at: datetime | str,
     slug, title = _validate_event(sources, issues)
     evaluated = [evaluate_program(src, slug, issues) for src in sources]
     issues.raise_if_any()
+    _validate_subdivisions(evaluated, issues)
+    issues.raise_if_any()
     order = {name: i for i, name in enumerate(PROGRAM_ORDER)}
-    programs = sorted(evaluated, key=lambda p: order[p.definition.name])
+    programs = sorted(evaluated, key=lambda p: (order[p.definition.name],
+                                                min((x.ak_kontr for x in p.participants), default=999), p.name))
 
     previous_results = (previous or {}).get("einzelwertungen")
     current = [r for p in programs if p.active for r in p.results]
@@ -921,16 +961,16 @@ def build_state(sources: list[ProgramSource], *, observed_at: datetime | str,
     for p in programs:
         if not p.active:
             continue
-        zeitplan.append({"programm": p.definition.name, "zeilen": p.source.zeitplan})
-        startlisten[p.definition.name] = _startliste(p)
-        einteilungen[p.definition.name] = _einteilung(p)
-        ranglisten[p.definition.name] = build_rankings(p)
+        zeitplan.append({"programm": p.name, "zeilen": p.source.zeitplan})
+        startlisten[p.name] = _startliste(p)
+        einteilungen[p.name] = _einteilung(p)
+        ranglisten[p.name] = build_rankings(p)
     return {
         "schema_version": SCHEMA_VERSION,
         "event": {"slug": slug, "titel": title},
         "beobachtet_am": utc_text(observed_at),
         "programme": [{
-            "programm": p.definition.name,
+            "programm": p.name,
             "aktiv": p.active,
             "rotationen": p.definition.rotationen,
             "rotation_freigegeben": p.rotation_max,
@@ -944,14 +984,14 @@ def build_state(sources: list[ProgramSource], *, observed_at: datetime | str,
         "einteilungen": einteilungen,
         "einzelwertungen": merge_live(previous_results, current, observed_at),
         "ranglisten": ranglisten,
-        "diagnose": {p.definition.name: p.diagnose for p in programs},
+        "diagnose": {p.name: p.diagnose for p in programs},
     }
 
 
 def _einteilung(program: ProgramResult) -> dict:
-    """Ansicht „Gerät“: je Rotation und Technikgerät die Teilnehmerschlüssel in Startposition (aus der Startliste)."""
+    """Ansicht „Gerät“: je Rotation und Station (auch Beweglichkeit) die Teilnehmerschlüssel in Startposition."""
     personen = {p.excel_id: p for p in program.participants}
-    geraete = [s.name for s in program.source.stations if s.name != ATHLETIK_STATION]
+    geraete = [s.name for s in program.source.stations]
     riegen = []
     for rotation in range(1, program.definition.rotationen + 1):
         for geraet in geraete:
@@ -973,7 +1013,7 @@ def _startliste(program: ProgramResult) -> list[dict]:
             continue
         groups.append({"startgeraet": station, "teilnehmer": [{
             "position": p.startposition, **p.public(), "jahrgang": p.jahrgang, "ak": p.ak,
-            "programm": program.definition.name, "startgeraet": p.startgeraet,
+            "programm": program.name, "startgeraet": p.startgeraet,
         } for p in people]})
     return groups
 

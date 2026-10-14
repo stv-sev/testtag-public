@@ -113,6 +113,20 @@ Pages-Build die Secrets.
 
 ---
 
+## Nachtrag 14.10.2026 spät: Beweglichkeit in „Gerät“, Subdivisionen
+
+- **Beweglichkeit** ist ein Gerät in „Gerät“ (alle Stationen der Startliste): Riege der Rotation mit Total
+  Beweglichkeit und Einzeltests, nur bis zur Freigabe.
+- **Subdivisionen:** Ein Programm kann auf mehrere Mappen verteilt werden (`Public!A9` `subdivision`, `B9`
+  Anzeigename, frei wählbar). Jede Subdivision ist öffentlich ein eigenes Programm mit eigener Freigabe (B5);
+  jede AK muss ganz in einer Subdivision stehen. Mappen über `--workbook` (mehrfach) bzw. `TESTTAG_WORKBOOKS`.
+  Programmnamen werden nicht mehr fest übersetzt; die Reihenfolge folgt der ersten AK-Zahl.
+- **Probelauf** (synthetische Kopien: AK5–AK9+ aufgeteilt in AK5–AK7 und AK8–AK9+, dazu AK9–AK12; Slug
+  `systemtest-probelauf-202610141416`, danach verborgen): drei Programme publiziert, Einteilung aller 177 Riegen =
+  `id_rotation` (inkl. Beweglichkeit), Freigabe je Subdivision unabhängig (Morgen 2 → 8 → 1, Vormittag 2) mit
+  offener Seite, Streamlit-Rückfall; Originalmappen, produktiver Testtag, `.env`, `main`, Pages unverändert.
+- **Tests:** pytest 337 (dreimal grün), Browsertest bestanden, 126/126 wie Streamlit.
+
 ## Nachtrag 14.10.2026 abends: eigene Ansicht „Gerät“, Einteilung aus der Startliste
 
 - **Warum vorher „nicht verfügbar“:** Die statische Seite liest nie Excel. Die produktive Publikation stammte noch

@@ -5,6 +5,9 @@ Format (eine Zuweisung pro Zeile, `#` am Zeilenanfang = Kommentar):
     SUPABASE_URL=https://<projekt>.supabase.co
     TESTTAG_WORKBOOK_AK5_AK9PLUS="C:\\Pfad mit Leerzeichen\\AK5.xlsx"
 
+Mehrere Arbeitsmappen (z. B. Subdivisionen eines Programms): statt der beiden Einzelpfade
+`TESTTAG_WORKBOOKS="C:\\…\\AK5-AK7.xlsx;C:\\…\\AK8-AK9plus.xlsx;C:\\…\\AK9-AK12.xlsx"` (durch `;` getrennt).
+
 - Nur bekannte Variablen (`KNOWN`); unbekannte, doppelte oder syntaktisch ungültige Einträge brechen ab.
 - Werte ohne Anführungszeichen dürfen keine Leerzeichen, Anführungszeichen oder `#` enthalten; in `"…"` oder
   `'…'` wird alles wörtlich übernommen (auch `\\` in Windows-Pfaden). Keine Variablenersetzung, keine
@@ -34,9 +37,10 @@ ENV_PUBLISHABLE_KEY = "SUPABASE_PUBLISHABLE_KEY"
 ENV_SECRET_KEY = "SUPABASE_SECRET_KEY"
 ENV_WORKBOOK_AK5 = "TESTTAG_WORKBOOK_AK5_AK9PLUS"
 ENV_WORKBOOK_AK9 = "TESTTAG_WORKBOOK_AK9_AK12"
+ENV_WORKBOOKS = "TESTTAG_WORKBOOKS"  # beliebig viele Mappen, durch ";" getrennt (statt der beiden Einzelpfade)
 ENV_POLL = "TESTTAG_POLL_SECONDS"
 SUPABASE_VARS = (ENV_URL, ENV_PUBLISHABLE_KEY, ENV_SECRET_KEY)
-KNOWN = (*SUPABASE_VARS, ENV_WORKBOOK_AK5, ENV_WORKBOOK_AK9, ENV_POLL)
+KNOWN = (*SUPABASE_VARS, ENV_WORKBOOK_AK5, ENV_WORKBOOK_AK9, ENV_WORKBOOKS, ENV_POLL)
 POLL_DEFAULT, POLL_MIN, POLL_MAX = 1, 1, 60
 MAX_FILE_BYTES = 64 * 1024
 
@@ -119,6 +123,21 @@ def workbook_paths(env: Mapping[str, str]) -> tuple[Optional[Path], Optional[Pat
         value = (env.get(name) or "").strip()
         return Path(value) if value else None
     return path(ENV_WORKBOOK_AK5), path(ENV_WORKBOOK_AK9)
+
+
+def workbook_sources(env: Mapping[str, str]) -> list[tuple[str, Optional[Path], Optional[str]]]:
+    """Konfigurierte Arbeitsmappen als (Kennung, Pfad, erwartetes Programm).
+
+    `TESTTAG_WORKBOOKS` (beliebig viele, Programm bzw. Subdivision aus Public!B4/B9) oder – wie bisher – die beiden
+    Einzelpfade mit festem Programm. Beides zugleich ist mehrdeutig und wird abgewiesen."""
+    liste = [Path(p.strip()) for p in (env.get(ENV_WORKBOOKS) or "").split(";") if p.strip()]
+    ak5, ak9 = workbook_paths(env)
+    if liste:
+        if ak5 is not None or ak9 is not None:
+            raise LocalConfigError(f"{ENV_WORKBOOKS} und {ENV_WORKBOOK_AK5}/{ENV_WORKBOOK_AK9} nicht gemeinsam "
+                                   "setzen (eine der beiden Angaben entfernen).")
+        return [(f"Mappe {i}", p, None) for i, p in enumerate(liste, start=1)]
+    return [("AK5-AK9+", ak5, "AK5-AK9+"), ("AK9-AK12", ak9, "AK9-AK12")]
 
 
 # ── Einmalige Anlage von .env ────────────────────────────────────────────────────────────────────────────

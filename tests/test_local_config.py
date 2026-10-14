@@ -173,10 +173,22 @@ class GitExclusionTests(unittest.TestCase):
                 self.assertEqual(self.check_ignore(name), 0)
         self.assertTrue(lc.git_ignores(ROOT))
 
+    def test_workbook_sources_single_paths_or_list(self):
+        alt = {"TESTTAG_WORKBOOK_AK5_AK9PLUS": "C:/a.xlsx", "TESTTAG_WORKBOOK_AK9_AK12": "C:/b.xlsx"}
+        self.assertEqual([(k, p) for k, _path, p in lc.workbook_sources(alt)], [("AK5-AK9+", "AK5-AK9+"),
+                                                                               ("AK9-AK12", "AK9-AK12")])
+        liste = lc.workbook_sources({"TESTTAG_WORKBOOKS": " C:/x 1.xlsx ;C:/y.xlsx;; C:/z.xlsx "})
+        self.assertEqual([(k, str(path).replace("\\", "/"), p) for k, path, p in liste],
+                         [("Mappe 1", "C:/x 1.xlsx", None), ("Mappe 2", "C:/y.xlsx", None), ("Mappe 3", "C:/z.xlsx", None)])
+        with self.assertRaises(lc.LocalConfigError):
+            lc.workbook_sources({"TESTTAG_WORKBOOKS": "C:/x.xlsx", "TESTTAG_WORKBOOK_AK9_AK12": "C:/b.xlsx"})
+
     def test_env_example_is_versioned_and_contains_only_placeholders(self):
         self.assertEqual(self.check_ignore(".env.example"), 1)
         values = lc.read_env_file(ROOT / ".env.example")
-        self.assertEqual(set(values), set(lc.KNOWN))
+        # TESTTAG_WORKBOOKS schliesst die beiden Einzelpfade aus: in der Vorlage nur als Kommentar beschrieben
+        self.assertEqual(set(values), set(lc.KNOWN) - {lc.ENV_WORKBOOKS})
+        self.assertIn(f"# {lc.ENV_WORKBOOKS}=", (ROOT / ".env.example").read_text(encoding="utf-8"))
         for name, value in values.items():
             if name != "TESTTAG_POLL_SECONDS":
                 self.assertIn("<", value, name)

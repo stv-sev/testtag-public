@@ -51,9 +51,8 @@
   const ANSICHTEN = ["live", "geraet", "rangliste", "startliste", "zeitplan"];
   const SCHEMA = "publikation-1";
   const ALLE = "Alle";
-  const PROGRAMM_REIHENFOLGE = ["AK5-AK9+", "AK9-AK12"];
-  const PROGRAMM_TEXT = { "AK5-AK9+": "AK5–AK9+", "AK9-AK12": "AK9–AK12" };
   const ATHLETIK_TEXT = { beweglichkeit: "Beweglichkeit", kraft: "Kraft" };
+  const BEWEGLICHKEIT = "Beweglichkeit";  // Station mit Einzeltests (vor Ort) statt Linien S/T
   const TITEL = { live: "Live", geraet: "Gerät", rangliste: "Ranglisten", startliste: "Startliste", zeitplan: "Zeitplan" };
   const SLUG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -71,7 +70,8 @@
   // ── Hilfen ────────────────────────────────────────────────────────────────────────────────────────
   const h = (t) => String(t ?? "").replace(/[&<>"']/g, (z) => `&#${z.charCodeAt(0)};`);
   const zahl = (w) => (w === null || w === undefined ? "–" : String(w));
-  const programmText = (p) => PROGRAMM_TEXT[p] || p;
+  // Programm bzw. Subdivision so, wie in Excel (Public!B4/B9) geschrieben; nur „-“ vor „AK“ wird zum Gedankenstrich.
+  const programmText = (p) => String(p ?? "").replace(/-(?=AK)/g, "–");
   const zeitFormat = new Intl.DateTimeFormat("de-CH", { timeZone: "Europe/Zurich", hour: "2-digit",
     minute: "2-digit", second: "2-digit", hourCycle: "h23" });
   const datumFormat = new Intl.DateTimeFormat("de-CH", { timeZone: "Europe/Zurich", day: "2-digit",
@@ -82,7 +82,8 @@
   };
   const akRang = (ak) => { const m = /\d+/.exec(ak || ""); return m ? Number(m[0]) : 999; };
   const vergleicheAk = (a, b) => akRang(a) - akRang(b) || (a < b ? -1 : a > b ? 1 : 0);
-  const programmRang = (p) => { const i = PROGRAMM_REIHENFOLGE.indexOf(p); return i < 0 ? 99 : i; };
+  // Programme (auch Subdivisionen wie „AK5–AK7“) nach der ersten AK-Zahl, dann nach Name.
+  const programmRang = (p) => { const m = /\d+/.exec(p || ""); return m ? Number(m[0]) : 999; };
   const vergleicheProgramm = (a, b) => programmRang(a) - programmRang(b) || (a < b ? -1 : a > b ? 1 : 0);
   const schluessel = (bereich, programm, ak) => `${bereich}\u0000${programm}\u0000${ak}`;
 
@@ -671,10 +672,16 @@
     const turner = eingeteilt.filter(([, t]) => ak === ALLE || t.ak === ak);
     const riegen = [...new Set(eingeteilt.map(([, t]) => t.startgeraet).filter(Boolean))];
     const startgeraet = riegen.length === 1 ? riegen[0] : "";
-    const resultate = new Map();  // nur veröffentlichte Technikresultate dieses Geräts (Publikation enthält nur Freigegebenes)
+    // nur veröffentlichte Resultate dieses Geräts (Publikation enthält nur Freigegebenes): Technik je Linie; an der
+    // Station Beweglichkeit die Beweglichkeitstests (vor Ort mit Rotation, extern ohne)
+    const beweglichkeit = geraet === BEWEGLICHKEIT;
+    const passt = (r) => (beweglichkeit
+      ? r.bereich === "beweglichkeit" && (r.rotation == null || (Number.isInteger(r.rotation) && r.rotation <= rot.freigegeben))
+      : r.bereich === "technik" && r.geraet === geraet && Number.isInteger(r.rotation) && r.rotation <= rot.freigegeben);
+    const resultate = new Map();
     for (const s of schl) {
       for (const r of zeilen.get(s).resultate || []) {
-        if (r.bereich !== "technik" || r.geraet !== geraet || !(Number.isInteger(r.rotation) && r.rotation <= rot.freigegeben)) continue;
+        if (!passt(r)) continue;
         if (!resultate.has(r.teilnehmer)) resultate.set(r.teilnehmer, []);
         resultate.get(r.teilnehmer).push(r);
       }
@@ -689,12 +696,15 @@
     }
     const karten = turner.map(([nr, t]) => {
       const eigene = (resultate.get(t.teilnehmer) || []).slice()
-        .sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
-      const total = eigene.length ? R.summe(eigene.map((r) => r.T)) : null;
-      const linien = eigene.map((r) => `<div class='tt-linie'><span>${h(r.anzeige)}</span><span class='tt-st'>S ${h(R.zahl(r.S))}</span>`
-        + `<b class='tt-st'>T ${h(R.zahl(r.T))}</b></div>`).join("");
+        .sort((a, b) => String(a.code).localeCompare(String(b.code), "de", { numeric: true }));
+      const total = eigene.length ? R.summe(eigene.map((r) => (beweglichkeit ? r.punkte : r.T))) : null;
+      const linien = eigene.map((r) => (beweglichkeit
+        ? `<div class='tt-linie'><span>${h(r.test)}</span><b class='tt-st'>${h(R.zahl(r.punkte))}</b></div>`
+        : `<div class='tt-linie'><span>${h(r.anzeige)}</span><span class='tt-st'>S ${h(R.zahl(r.S))}</span>`
+          + `<b class='tt-st'>T ${h(R.zahl(r.T))}</b></div>`)).join("");
       const inhalt = eigene.length
-        ? `<div class='tt-dz tt-total'><span>Gerätetotal ${h(geraet)}</span><b>${h(R.zahl(total))}</b></div><div class='tt-linien'>${linien}</div>`
+        ? `<div class='tt-dz tt-total'><span>${beweglichkeit ? "Total Beweglichkeit" : `Gerätetotal ${h(geraet)}`}</span>`
+          + `<b>${h(R.zahl(total))}</b></div><div class='tt-linien'>${linien}</div>`
         : "<div class='tt-dhinweis'>Noch kein veröffentlichtes Resultat an diesem Gerät.</div>";
       const meta = [t.verein, t.ak].filter(Boolean).map(h).join(" · ");
       return `<div class='tt-karte tt-rangkarte'><details data-k='${h(`rot|${geraet}|${auswahl.rotation}|${t.teilnehmer}`)}'><summary>`
@@ -704,7 +714,8 @@
         + `</summary><div class='tt-details'>${inhalt}</div></details></div>`;
     });
     setzeInhalt(`${kopf}<div class='tt-liste tt-rangliste'>${karten.join("")}</div><div class='tt-anzahl'>In Startreihenfolge, `
-      + "ohne Rang. – = noch kein veröffentlichtes Resultat. Turner antippen für die Linien; T = Linienpunkte.</div>",
+      + `ohne Rang. – = noch kein veröffentlichtes Resultat. ${beweglichkeit ? "Turner antippen für die Tests."
+        : "Turner antippen für die Linien; T = Linienpunkte."}</div>`,
     info(turner.length, { riege: startgeraet, mitNote: turner.filter(([, t]) => resultate.has(t.teilnehmer)).length }));
   }
 

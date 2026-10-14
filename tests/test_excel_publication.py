@@ -312,11 +312,11 @@ class ListsTests(Base):
         e5 = rows[("startliste", AK5)]["inhalt"]["einteilung"]
         stationen = [s.name for s in ep.read_program_source(self.dir / "wb1.xlsx", wait_seconds=0,
                                                               sleep=lambda _s: None).stations]
-        technik = [s for s in stationen if s != "Beweglichkeit"]
-        self.assertEqual(e5["geraete"], technik)  # nur Technikgeräte, Reihenfolge tab_startgeraet
+        self.assertEqual(e5["geraete"], stationen)  # alle Stationen inkl. Beweglichkeit, Reihenfolge tab_startgeraet
+        self.assertIn("Beweglichkeit", e5["geraete"])
         self.assertEqual((e5["rotationen"], e5["freigegeben"]), (8, 7))  # Public!B5, nie B7
         self.assertEqual([(r["rotation"], r["geraet"]) for r in e5["riegen"]],
-                         [(rot, g) for rot in range(1, 9) for g in technik])
+                         [(rot, g) for rot in range(1, 9) for g in stationen])
         # Riege je Rotation × Gerät = Abschnitt, der laut Startliste-Code dort turnt, in Startposition
         n = len(stationen)
         for riege in e5["riegen"]:
@@ -455,3 +455,47 @@ class ExcelSafetyTests(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SubdivisionTests(Base):
+    """Ein Programm in zwei Mappen (Subdivisionen, Public!B9): öffentlich als eigene Programme."""
+
+    def teile(self, name_a: str = "AK5–AK6", name_b: str = "AK7", public_a: dict | None = None) -> tuple[Path, Path]:
+        people = testtag_spec(AK5)["participants"]
+        return (self.book(AK5, public={"subdivision": name_a, **(public_a or {})},
+                          participants=[p for p in people if p[5] == "AK 6"]),
+                self.book(AK5, public={"subdivision": name_b}, participants=[p for p in people if p[5] == "AK 7"]))
+
+    def test_subdivisions_are_published_as_own_programs(self):
+        a, b = self.teile(public_a={"published_rotation_max": 0})
+        state = self.state(b, self.book(AK9), a)  # Reihenfolge der Mappen egal
+        self.assertEqual([p["programm"] for p in state["programme"]], ["AK5–AK6", "AK7", AK9])
+        self.assertEqual([p["rotation_freigegeben"] for p in state["programme"]], [0, 8, 7])  # B5 je Mappe
+        rows = pm.publication_rows(state)
+        self.assertEqual({r["programm"] for r in rows if r["programm"]}, {"AK5–AK6", "AK7", AK9})
+        self.assertEqual({(r["programm"], r["ak"]) for r in rows if r["bereich"] == "resultate_rangliste"},
+                         {("AK5–AK6", "AK 6"), ("AK7", "AK 7"), *{(AK9, g["ak"]) for g in state["ranglisten"][AK9]}})
+        start = {r["programm"]: r["inhalt"] for r in rows if r["bereich"] == "startliste"}
+        self.assertEqual(start["AK5–AK6"]["einteilung"]["freigegeben"], 0)
+        self.assertEqual(start["AK7"]["einteilung"]["freigegeben"], 8)
+        self.assertEqual(sum(len(t) for g in start["AK7"]["gruppen"] for t in [g["teilnehmer"]]), 3)
+        self.assertTrue(all(t["programm"] == "AK7" for g in start["AK7"]["gruppen"] for t in g["teilnehmer"]))
+        self.assertEqual([z["programm"] for z in state["zeitplan"]], ["AK5–AK6", "AK7", AK9])
+        # ohne Subdivision bleibt alles wie bisher (Programmname = Public!B4)
+        einfach = self.state(self.book(AK5), self.book(AK9))
+        self.assertEqual([p["programm"] for p in einfach["programme"]], [AK5, AK9])
+
+    def test_subdivision_errors(self):
+        people = testtag_spec(AK5)["participants"]
+        with self.subTest(fall="Programm doppelt ohne Subdivision"):
+            self.error(Code.PROGRAMM_DOPPELT, self.book(AK5), self.book(AK5), self.book(AK9))
+        with self.subTest(fall="gleiche Subdivision"):
+            self.error(Code.PROGRAMM_DOPPELT, *self.teile("AK5–AK7", "AK5–AK7"), self.book(AK9))
+        with self.subTest(fall="Subdivision gleich wie anderes Programm"):
+            self.error(Code.PROGRAMM_DOPPELT, *self.teile("AK5–AK6", AK9), self.book(AK9))
+        with self.subTest(fall="zu lang"):
+            self.error(Code.SUBDIVISION_UNGUELTIG, *self.teile("A" * 41, "AK7"), self.book(AK9))
+        with self.subTest(fall="AK in beiden Subdivisionen"):
+            a = self.book(AK5, public={"subdivision": "Morgen"}, participants=[p for p in people if p[0] in (1, 3)])
+            b = self.book(AK5, public={"subdivision": "Vormittag"}, participants=[p for p in people if p[0] in (2, 4)])
+            self.error(Code.SUBDIVISION_UNGUELTIG, a, b, self.book(AK9))

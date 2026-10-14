@@ -563,17 +563,40 @@ vorgesehenen Geräten und Linien (`code`, `anzeige`, bei Sprung-Alternativen `al
 Sie ist nötig, damit ein noch fehlendes Resultat als „–“ erscheinen kann. Ältere Stände ohne `struktur` (z. B.
 bestehende Archive) zeigen nur die veröffentlichten Linien und Tests.
 
+## Subdivisionen (ein Programm in mehreren Mappen)
+
+Ob ein Programm aufgeteilt wird und welche AK eine Subdivision enthält, bestimmen allein die Arbeitsmappen:
+
+- Je Subdivision eine eigene Mappe mit ihrer Anmeldung (nur deren Turner), Startliste, Noteneingabe und Zeitplan.
+- `Public!B4` bleibt das Programm (z. B. `AK5-AK9+`, bestimmt Stationen, Linien und Athletiktests).
+- Neu `Public!A9` = `subdivision`, `B9` = Anzeigename, z. B. `AK5–AK7` bzw. `AK8–AK9+` (frei wählbar, höchstens 40
+  Zeichen). Ohne Eintrag in B9 gilt wie bisher der Programmname.
+- `Public!B5` (Freigabe) gilt je Mappe – jede Subdivision hat ihre eigene Rotationsfreigabe. B2 (Slug), B3 (Titel)
+  sind in allen Mappen gleich.
+
+Öffentlich erscheint jede Subdivision als eigenes Programm (Live, Gerät, Ranglisten, Startliste, Zeitplan), geordnet
+nach der ersten AK-Zahl im Namen. Der Publisher prüft: Namen eindeutig (auch gegenüber anderen Programmen), ein
+mehrfach vorkommendes Programm hat in jeder Mappe eine Subdivision, und **jede AK steht in genau einer Subdivision**
+(sonst wäre die Rangliste der AK geteilt; Fehlercode `SUBDIVISION_UNGUELTIG`). Namen werden so angezeigt, wie sie in
+Excel stehen; nur ein Bindestrich vor „AK“ wird zum Gedankenstrich.
+
+Mappen angeben: `--workbook <Mappe>` mehrfach bzw. in `.env`
+`TESTTAG_WORKBOOKS="<Pfad>\AK5-AK7.xlsx;<Pfad>\AK8-AK9plus.xlsx;<Pfad>\AK9-AK12.xlsx"` (statt der beiden
+Einzelpfade; beides zugleich wird abgewiesen). Gilt für Publisher, `--check` und Dauerbetrieb (`live_runner`).
+
 ## Ansicht „Gerät“
 
 Eigene Pille auf der statischen Seite (Reihenfolge: Live · Gerät · Ranglisten · Startliste · Zeitplan). Wählbar sind
 Programm, Gerät, Rotation und optional die AK. Gezeigt wird die Riege, die in dieser Rotation an diesem Gerät turnt,
-in Startreihenfolge – auch ohne Note; bei veröffentlichten Resultaten Gerätetotal und Linien S/T, ohne Ränge. Wählbar
+in Startreihenfolge – auch ohne Note; bei veröffentlichten Resultaten Gerätetotal und Linien S/T, ohne Ränge. Geräte
+sind alle Stationen der Startliste, auch **Beweglichkeit** (dort Total Beweglichkeit und die Einzeltests statt S/T;
+bei externer Erfassung ohne Station, z. B. AK9–AK12, gibt es kein Gerät Beweglichkeit). Wählbar
 sind nur Rotationen 1 bis zur Freigabe (`Public!B5`), auch über die Adresse; sinkt die Freigabe, wird eine nicht mehr
 zulässige Auswahl verworfen. Es gibt keine „aktuelle Rotation“: ohne Wahl wird keine Riege gezeigt.
 
 **Einteilung aus Excel:** Der Publisher übernimmt die Einteilung direkt aus dem Blatt `Startliste`: Dort steht je
 Person und Rotation der Code `@ID°Rotation çGerät ^Startposition` (Zeichen laut Legende `id_athlete … id_position`;
-`ç` = Position des Geräts in `tab_startgeraet`). Er prüft jeden Code gegen Zeile und Spalte, verlangt jede Rotation und
+`ç` = Position der Station in `tab_startgeraet`). Er prüft jeden Code gegen Zeile und Spalte, verlangt jede Rotation und
 Station je Person genau einmal und eindeutige Startpositionen und gleicht die Einteilung mit `id_rotation` der
 Noteneingabe ab. Bei einem Widerspruch (`EINTEILUNG_UNGUELTIG`) wird nichts geschrieben.
 

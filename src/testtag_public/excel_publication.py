@@ -169,6 +169,10 @@ def _read_public(ws, sheet: _Sheet, issues: Issues) -> dict:
         if sheet.text(row, 1) != label:
             issues.add(Code.PUBLIC_UNGUELTIG, f"Public!{label_cell} muss die Beschriftung '{label}' enthalten.")
         public[key] = sheet.get(int(value_cell[1:]), 2)
+    # Optional: Subdivision eines Programms (Public!A9 „subdivision“, B9 Anzeigename, z. B. „AK5–AK7“).
+    public["subdivision"] = sheet.get(9, 2) if sheet.text(9, 1) == "subdivision" else None
+    if isinstance(public["subdivision"], str) and not public["subdivision"].strip():
+        public["subdivision"] = None
     return public
 
 

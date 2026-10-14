@@ -1,11 +1,12 @@
-"""P1F: lokaler Dauerpublisher für genau die beiden konfigurierten Arbeitsmappen.
+"""P1F: lokaler Dauerpublisher für die konfigurierten Arbeitsmappen (zwei Programme oder – mit TESTTAG_WORKBOOKS –
+beliebig viele, z. B. Subdivisionen).
 
     python -B -m testtag_public.live_runner --confirm-slug <Event-Slug>   # Dauerbetrieb (Ctrl+C beendet)
     python -B -m testtag_public.live_runner --check                       # einmal prüfen, ohne Netzwerk
 
 Ablauf je Takt (`TESTTAG_POLL_SECONDS`, Standard 1 s, zulässig 1–60):
 
-1. Grösse und Änderungszeit beider Dateien erfassen (günstiger Hinweis, kein Lesen des Inhalts).
+1. Grösse und Änderungszeit aller Dateien erfassen (günstiger Hinweis, kein Lesen des Inhalts).
 2. Entspricht der kombinierte Stand dem zuletzt erfolgreich publizierten: nichts tun.
 3. Sonst warten, bis jede Datei mindestens `STABIL_SEKUNDEN` (2 s) und in mindestens zwei aufeinanderfolgenden
    Takten unverändert ist.
@@ -58,7 +59,7 @@ from .publication_model import Issue, PublicationError, build_state, publication
 from .publisher import SafeReport, _check_program
 from .write_scope import SlugScope
 
-PROGRAMME = ("AK5-AK9+", "AK9-AK12")
+PROGRAMME = ("AK5-AK9+", "AK9-AK12")  # Kennungen der beiden Einzelpfade (ohne TESTTAG_WORKBOOKS)
 OPTIONEN = {"AK5-AK9+": local_config.ENV_WORKBOOK_AK5, "AK9-AK12": local_config.ENV_WORKBOOK_AK9}
 LOG_NAME = "live_runner.log"
 LOG_BYTES = 256 * 1024
@@ -198,7 +199,7 @@ class InstanceLock:
 
 def lock_path(out_dir: Path, paths: dict[str, Path]) -> Path:
     """Kennung aus den normalisierten Pfaden (Hash, keine Pfade im Dateinamen)."""
-    key = "\n".join(os.path.normcase(os.path.abspath(str(paths[p]))) for p in PROGRAMME)
+    key = "\n".join(os.path.normcase(os.path.abspath(str(p))) for p in paths.values())
     return out_dir / f"live-{hashlib.sha256(key.encode('utf-8')).hexdigest()[:12]}.lock"
 
 
@@ -215,12 +216,15 @@ class Runner:
                  log: Callable[[str], None], report: Optional[SafeReport] = None, transport=None,
                  now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                  monotonic: Callable[[], float] = time.monotonic, read=read_program_source, publish=dp.publish,
-                 offen: Optional[dict] = None):
+                 offen: Optional[dict] = None, erwartet: Optional[dict] = None):
         self.config, self.paths, self.slug, self.poll = config, paths, confirm_slug, poll
+        self.programme = tuple(paths)  # Kennungen der Mappen (Programm oder „Mappe n“)
+        # erwartetes Programm je Kennung (Einzelpfade); bei TESTTAG_WORKBOOKS steht es nur in der Mappe
+        self.erwartet = erwartet if erwartet is not None else {k: k for k in paths if k in OPTIONEN}
         self.log, self.report, self.transport = log, report, transport
         self.now, self.monotonic, self.read, self.publish = now, monotonic, read, publish
-        self.last_stat: dict[str, object] = {p: None for p in PROGRAMME}
-        self.stable = {p: 0 for p in PROGRAMME}
+        self.last_stat: dict[str, object] = {p: None for p in self.programme}
+        self.stable = {p: 0 for p in self.programme}
         self.stable_ticks = max(2, math.ceil(STABIL_SEKUNDEN / poll) + 1)  # Takt 1 s: 3 Beobachtungen über 2 s
         self.gelesen: dict[str, tuple] = {}  # Programm -> (Dateistand, zuletzt erfolgreich gelesene Quelle)
         self.verarbeitet: Optional[Verarbeitet] = None
@@ -248,6 +252,11 @@ class Runner:
             text = text.replace(path.name, program)
         return text
 
+    def _programme_pruefen(self, sources: list) -> None:
+        for source, kennung in zip(sources, self.programme):
+            if self.erwartet.get(kennung):
+                _check_program(source, self.erwartet[kennung], OPTIONEN.get(kennung, kennung))
+
     def _retry(self, kategorie: str, text: str, combined: tuple) -> str:
         self.failures += 1
         delay = min(self.poll * 2 ** (self.failures - 1), MAX_BACKOFF)
@@ -264,22 +273,22 @@ class Runner:
     # Ein Takt
     def tick(self) -> str:
         stats = {}
-        for program in PROGRAMME:
+        for program in self.programme:
             try:
                 stats[program] = _snapshot(self.paths[program])
             except SourceError as exc:
                 stats[program] = ("fehler", str(exc))
             self.stable[program] = self.stable[program] + 1 if stats[program] == self.last_stat[program] else 1
         self.last_stat = dict(stats)
-        combined = tuple(stats[p] for p in PROGRAMME)
+        combined = tuple(stats[p] for p in self.programme)
         if self.verarbeitet is not None and combined == self.verarbeitet.stats:
             return self._offen_pruefen(combined)
-        for program in PROGRAMME:
+        for program in self.programme:
             if stats[program][0] == "fehler":
                 self._note((combined, program, "fehler"),
                            f"{program}: Datei nicht verfügbar ({self._clean(stats[program][1])}) – neuer Versuch")
                 return "datei_fehler"
-        unstable = [p for p in PROGRAMME if self.stable[p] < self.stable_ticks]
+        unstable = [p for p in self.programme if self.stable[p] < self.stable_ticks]
         if unstable:
             for program in unstable:
                 self._note((combined, program, "aenderung"), f"{program}: Änderung erkannt – Datei noch in "
@@ -292,23 +301,22 @@ class Runner:
         return self._process(combined)
 
     def _process(self, combined: tuple) -> str:
-        changed = [p for i, p in enumerate(PROGRAMME)
+        changed = [p for i, p in enumerate(self.programme)
                    if self.verarbeitet is None or self.verarbeitet.stats[i] != combined[i]]
-        lesen = [p for i, p in enumerate(PROGRAMME) if self.gelesen.get(p, (None,))[0] != combined[i]]
+        lesen = [p for i, p in enumerate(self.programme) if self.gelesen.get(p, (None,))[0] != combined[i]]
         self.log(f"Datei stabil: {', '.join(changed)} – gelesen wird {', '.join(lesen)}"
-                 + ("" if len(lesen) == len(PROGRAMME) else "; unveränderte Arbeitsmappe nicht erneut gelesen"))
+                 + ("" if len(lesen) == len(self.programme) else "; unveränderte Arbeitsmappe nicht erneut gelesen"))
         try:
             sources = [self.read(self.paths[p], wait_seconds=0, sleep=lambda _s: None) if p in lesen
-                       else self.gelesen[p][1] for p in PROGRAMME]
-            for source, program in zip(sources, PROGRAMME):
-                _check_program(source, program, OPTIONEN[program])
+                       else self.gelesen[p][1] for p in self.programme]
+            self._programme_pruefen(sources)
             if {s.public.get("event_id") for s in sources} != {self.slug}:
                 raise PublicationError([Issue(SLUG_ABWEICHUNG, "Public!B2 entspricht nicht dem bestätigten Slug.")])
         except SourceError as exc:
             return self._retry("Dateifehler", str(exc), combined)
         except PublicationError as exc:
             return self._invalid(exc, combined)
-        self.gelesen = {p: (combined[i], sources[i]) for i, p in enumerate(PROGRAMME)}
+        self.gelesen = {p: (combined[i], sources[i]) for i, p in enumerate(self.programme)}
         self.offen_basis.clear()  # geöffneten Stand danach einmal abgleichen (Kopie, ohne Anfrage wenn gleich)
         return self._veroeffentlichen(sources, combined)
 
@@ -394,7 +402,7 @@ class Runner:
             except PublicationError as exc:
                 self.offen_basis.update(stabil)  # diesen Stand nicht erneut prüfen
                 return self._invalid(exc, combined, "nach der nächsten Änderung")
-        bisher = {p: self.gelesen[p][1] for p in PROGRAMME if p in self.gelesen}
+        bisher = {p: self.gelesen[p][1] for p in self.programme if p in self.gelesen}
         geaendert = [p for p, src in neu.items() if p not in bisher or _inhalt(src) != _inhalt(bisher[p])]
         if not geaendert:
             self.offen_basis.update(stabil)
@@ -404,9 +412,8 @@ class Runner:
         self.log(f"Excel-Stand geändert: {', '.join(geaendert)} – geöffnete Arbeitsmappe ohne neuen Speicherstand "
                  "wird über eine Kopie gelesen")
         try:
-            sources = [neu.get(p) or self.gelesen[p][1] for p in PROGRAMME]
-            for source, program in zip(sources, PROGRAMME):
-                _check_program(source, program, OPTIONEN[program])
+            sources = [neu.get(p) or self.gelesen[p][1] for p in self.programme]
+            self._programme_pruefen(sources)
             if {s.public.get("event_id") for s in sources} != {self.slug}:
                 raise PublicationError([Issue(SLUG_ABWEICHUNG, "Public!B2 entspricht nicht dem bestätigten Slug.")])
         except PublicationError as exc:
@@ -418,7 +425,7 @@ class Runner:
             for p in stabil:
                 self.offen_kandidat.pop(p, None)
         if status not in ("wiederholung_geplant", "validierung_fehler"):
-            for i, p in enumerate(PROGRAMME):  # gilt bis zur nächsten Dateiänderung als aktueller Inhalt
+            for i, p in enumerate(self.programme):  # gilt bis zur nächsten Dateiänderung als aktueller Inhalt
                 self.gelesen[p] = (combined[i], sources[i])
         return status
 
@@ -454,19 +461,22 @@ def _inhalt(source) -> str:
 
 # ── Kommandozeile ────────────────────────────────────────────────────────────────────────────────────────
 
-def _paths(env) -> dict[str, Path]:
-    ak5, ak9 = local_config.workbook_paths(env)
-    missing = [OPTIONEN[p] for p, v in zip(PROGRAMME, (ak5, ak9)) if v is None]
+def _paths(env) -> tuple[dict[str, Path], dict[str, Optional[str]]]:
+    """(Pfade je Kennung, erwartetes Programm je Kennung) aus der Konfiguration."""
+    quellen = local_config.workbook_sources(env)
+    missing = [OPTIONEN.get(k, k) for k, path, _p in quellen if path is None]
     if missing:
         raise local_config.LocalConfigError("Arbeitsmappen nicht konfiguriert: " + ", ".join(missing))
-    return {"AK5-AK9+": ak5, "AK9-AK12": ak9}
+    return {k: path for k, path, _p in quellen}, {k: p for k, _path, p in quellen}
 
 
-def _check(paths: dict[str, Path], report: SafeReport) -> int:
+def _check(paths: dict[str, Path], report: SafeReport, erwartet: Optional[dict] = None) -> int:
+    erwartet = erwartet if erwartet is not None else {k: k for k in paths if k in OPTIONEN}
     sources = []
-    for program in PROGRAMME:
-        source = read_program_source(paths[program], wait_seconds=2)
-        _check_program(source, program, OPTIONEN[program])
+    for kennung, path in paths.items():
+        source = read_program_source(path, wait_seconds=2)
+        if erwartet.get(kennung):
+            _check_program(source, erwartet[kennung], OPTIONEN.get(kennung, kennung))
         sources.append(source)
     state = build_state(sources, observed_at=datetime.now(timezone.utc))
     report.protect_state(state)
@@ -486,9 +496,9 @@ def main(argv: Optional[list[str]] = None, *, environ=None, out_dir: Optional[Pa
     environ = os.environ if environ is None else environ
     out_dir = out_dir or local_config.PROJECT_ROOT / "out"
     parser = argparse.ArgumentParser(prog="python -B -m testtag_public.live_runner",
-                                     description="P1F: Dauerpublisher für die beiden konfigurierten Arbeitsmappen.")
+                                     description="P1F: Dauerpublisher für die konfigurierten Arbeitsmappen.")
     parser.add_argument("--confirm-slug", help="Exakter Event-Slug (Public!B2) als Bestätigung für den Dauerbetrieb")
-    parser.add_argument("--check", action="store_true", help="Beide Arbeitsmappen einmal prüfen, ohne Netzwerk")
+    parser.add_argument("--check", action="store_true", help="Alle Arbeitsmappen einmal prüfen, ohne Netzwerk")
     report = SafeReport(stdout, stderr, (environ.get(db.ENV_SECRET_KEY), environ.get(db.ENV_PUBLISHABLE_KEY)))
     try:
         args = parser.parse_args(argv)
@@ -505,9 +515,9 @@ def main(argv: Optional[list[str]] = None, *, environ=None, out_dir: Optional[Pa
         env = local_config.load_env(environ)
         report.secrets += tuple(s for s in (env.get(db.ENV_SECRET_KEY), env.get(db.ENV_PUBLISHABLE_KEY)) if s)
         poll = local_config.poll_seconds(env)
-        paths = _paths(env)
+        paths, erwartet = _paths(env)
         if args.check:
-            return _check(paths, report)
+            return _check(paths, report, erwartet)
         if not args.confirm_slug:
             report.err("FEHLER: --confirm-slug <Event-Slug> fehlt; nichts gestartet.")
             return 2
@@ -515,16 +525,16 @@ def main(argv: Optional[list[str]] = None, *, environ=None, out_dir: Optional[Pa
         lock = InstanceLock(lock_path(out_dir, paths))
         lock_state = lock.acquire()
         log = BetriebsLog(stdout, report, out_dir / LOG_NAME)
-        log(f"Start: Dauerpublisher für {args.confirm_slug} (Programme {', '.join(PROGRAMME)}, Takt {poll} s, "
+        log(f"Start: Dauerpublisher für {args.confirm_slug} (Mappen {', '.join(paths)}, Takt {poll} s, "
             f"Sperre {lock_state}). Beenden mit Ctrl+C.")
         offen = None
         if os.name == "nt" and excel_live.verfuegbar():
-            offen = {p: excel_live.OffeneMappe(paths[p]) for p in PROGRAMME}
+            offen = {p: excel_live.OffeneMappe(path) for p, path in paths.items()}
         else:
             log("Hinweis: Beobachtung geöffneter Excel-Mappen nicht verfügbar (nur Windows mit pywin32) – "
                 "es zählt nur der Speicherstand der Dateien")
         runner = Runner(config, paths, confirm_slug=args.confirm_slug, poll=poll, log=log, report=report,
-                        transport=SlugScope(transport, args.confirm_slug), offen=offen)
+                        transport=SlugScope(transport, args.confirm_slug), offen=offen, erwartet=erwartet)
         try:
             runner.run(stop=stop)
             log("Ende: Dauerpublisher beendet")

@@ -15,7 +15,7 @@ const CONFIG_JS = process.env.CONFIG_JS || new URL("../docs/config.js", import.m
 const daten = JSON.parse(readFileSync(datei, "utf8"));
 const { id: ID, slug: SLUG, titel: TITEL } = daten.testtag;
 const STREAMLIT = "https://testtag.streamlit.app";
-const PROGRAMM_TEXT = { "AK5-AK9+": "AK5–AK9+", "AK9-AK12": "AK9–AK12" };
+const programmText = (p) => String(p ?? "").replace(/-(?=AK)/g, "–");  // wie live.js / quelle.programm_text
 const staende = Object.fromEntries(daten.staende.map((s) => [s.name, s]));
 
 // ── nachgebildete Supabase (PostgREST-Ausschnitt, den live.js verwendet) ───────────────────────────────
@@ -290,7 +290,8 @@ const gezeichnet = {};
   `Freigabe 2: nur Rotation 1–2 wählbar, r=5 aus der Adresse verworfen (${new URL(page.url()).search})`);
   pruefe((await text()).includes("Rotation wählen") && !(await text()).includes("Lea"), "ohne gewählte Rotation keine Riege (keine „aktuelle Rotation“)");
   pruefe(JSON.stringify(await page.locator("#geraet option").allTextContents())
-    === JSON.stringify(["Boden", "Pferd", "Ringe", "Sprung", "Barren", "Trampolin", "Reck"]), "Geräte: Technikstationen in Stationsfolge");
+    === JSON.stringify(["Boden", "Pferd", "Ringe", "Beweglichkeit", "Sprung", "Barren", "Trampolin", "Reck"]),
+  "Geräte: alle Stationen der Startliste in Stationsfolge, auch Beweglichkeit");
   pruefe((await page.textContent("#hinweise")).includes("Resultate bis Rotation 2 von 8 freigegeben."), "Hinweis Freigabe (keine laufende Rotation)");
   pruefe(await page.locator("[data-ansicht=geraet].aktiv").count() === 1 && await page.locator("#arten").isHidden()
     && await page.inputValue("#ak") === "Alle", "Pille Gerät aktiv, keine Ranglistenebenen, AK optional (Alle)");
@@ -321,6 +322,18 @@ const gezeichnet = {};
   await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("keine Riege eingeteilt"));
   pruefe(true, "Reck, Rotation 2: keine Riege (Startgerät Trampolin leer)");
   pruefe(await breite(page), "Smartphone: Gerät ohne waagrechte Scrollbar");
+  // Beweglichkeit als Gerät: Riege der Rotation 4 (Startgerät Boden) mit Total Beweglichkeit und Einzeltests
+  sb.stand = staende.r8;
+  await page.goto(adresse("&ansicht=geraet&p=AK5-AK9%2B&g=Beweglichkeit&r=4"));
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Rotation 4 · Beweglichkeit · Riege Startgerät Boden"));
+  await page.locator(".tt-rangkarte", { hasText: "Lea" }).locator("summary").click();
+  const bew = (await page.locator(".tt-rangkarte", { hasText: "Lea" }).innerText()).replace(/\s+/g, " ");
+  pruefe(bew.includes("Total Beweglichkeit 0") && bew.includes("Bücke 0") && !bew.includes(" S ") && !bew.includes("T "),
+    `Beweglichkeit: Total und Einzeltests statt S/T (${bew.slice(0, 120)})`);
+  sb.stand = staende.r2;
+  await page.goto(adresse("&ansicht=geraet&p=AK5-AK9%2B&g=Beweglichkeit&r=1"));
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Rotation 1 · Beweglichkeit"));
+  pruefe(!(await text()).includes("Bücke"), "Beweglichkeit, Freigabe 2: keine Testpunkte aus nicht freigegebenen Rotationen");
   // Freigabe sinkt: Rotation 8 gewählt, neue Publikation mit Freigabe 2 → Auswahl verworfen
   sb.stand = staende.r8;
   await page.goto(adresse("&ansicht=geraet&p=AK5-AK9%2B&g=Boden&r=8"));
@@ -455,7 +468,7 @@ for (const ansicht of ["startliste", "zeitplan"]) {  // Archiv: Link ins Streaml
       await page.goto(adresse(`&ansicht=rangliste&p=${encodeURIComponent(p)}&ak=${encodeURIComponent(ak)}&art=${art}`));
       await bereit(page);
       gezeichnet[s.name][k] = await page.innerHTML("#inhalt");
-      const programme = [...new Set(Object.keys(s.listen).map((x) => x.split("|")[0]))].map((x) => PROGRAMM_TEXT[x] || x);
+      const programme = [...new Set(Object.keys(s.listen).map((x) => x.split("|")[0]))].map(programmText);
       const aks = [...new Set(Object.keys(s.listen).filter((x) => x.startsWith(`${p}|`)).map((x) => x.split("|")[1]))];
       optionenOk.push(JSON.stringify(await page.locator("#programm option").allTextContents()) === JSON.stringify(programme)
         && JSON.stringify(await page.locator("#ak option").allTextContents()) === JSON.stringify(aks)

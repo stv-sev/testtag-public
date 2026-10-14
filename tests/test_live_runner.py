@@ -19,7 +19,7 @@ from unittest import mock
 
 import _support
 from _support import (AK5, AK9, TEST_ENV, TEST_PUBLISHABLE_KEY, TEST_SECRET_KEY, TT_SECRET_MARKERS, TT_SLUG,
-                      FakeDataApi, make_testtag_workbook)
+                      FakeDataApi, make_testtag_workbook, testtag_spec)
 
 from testtag_public import database_publisher as dp
 from testtag_public import excel_live as el
@@ -660,6 +660,28 @@ class MainTests(Base):
         self.assertIn("TESTTAG_WORKBOOK_AK9_AK12", err)
         self.assertEqual(self.api.calls, [])
         self.assertEqual(list((self.dir / "out").glob("*.lock")) if (self.dir / "out").exists() else [], [])
+
+    def test_any_number_of_workbooks_via_testtag_workbooks(self):
+        people = testtag_spec(AK5)["participants"]
+        mappen = [make_testtag_workbook(self.dir / "ak5-a.xlsx", AK5, public={"subdivision": "AK5–AK6"},
+                                        participants=[x for x in people if x[5] == "AK 6"]),
+                  make_testtag_workbook(self.dir / "ak5-b.xlsx", AK5, public={"subdivision": "AK7"},
+                                        participants=[x for x in people if x[5] == "AK 7"]),
+                  self.paths[AK9]]
+        environ = {**TEST_ENV, "TESTTAG_WORKBOOKS": ";".join(str(m) for m in mappen), "TESTTAG_POLL_SECONDS": "2"}
+        code, out, err = self.main("--check", environ=environ)
+        self.assertEqual(code, 0, err)
+        for name in ("AK5–AK6", "AK7", AK9):
+            self.assertIn(f"Programm:            {name} ", out)
+        self.assertEqual(self.api.calls, [])
+        paths, erwartet = lr._paths(environ)
+        self.assertEqual(list(paths), ["Mappe 1", "Mappe 2", "Mappe 3"])
+        self.assertEqual(set(erwartet.values()), {None})
+        runner = lr.Runner(self.config, paths, confirm_slug=TT_SLUG, poll=5, log=lambda _t: None,
+                           transport=self.api, erwartet=erwartet, monotonic=lambda: 0.0)
+        self.assertEqual([runner.tick() for _ in range(2)], ["in_bearbeitung", "publiziert"])
+        self.assertTrue(any(c["table"] == "veroeffentlichung" and c["method"] != "GET" for c in self.api.calls))
+        self.assert_safe(out + err)
 
     def test_check_mode_validates_without_network(self):
         code, out, err = self.main("--check")

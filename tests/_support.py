@@ -232,6 +232,9 @@ def make_testtag_workbook(path: Path, program: str = AK5, spec: dict | None = No
                                "Kraftmodus", "Beweglichkeitsmodus"), start=2):
         ws.cell(row, 1, key)
         ws.cell(row, 2, spec["public"].get(key))
+    if "subdivision" in spec["public"]:  # optional: Subdivision eines Programms (Public!A9/B9)
+        ws.cell(9, 1, "subdivision")
+        ws.cell(9, 2, spec["public"]["subdivision"])
 
     ws = wb.create_sheet("Anmeldung")
     for col, head in enumerate(("ID", "Name", "Vorname", "Jg.", "Verein", "AK", "Startgeraet", "GeraetID", "akKontr"), 1):
