@@ -545,8 +545,10 @@ weiterhin wie bisher wiederholt. Regressionstests: `OpenWorkbookTests` in `tests
 Die Rangliste hat drei Ebenen (Gesamt, Technik, Athletik), je rangiert nach dem Total der Ebene. Programm und AK
 bleiben wählbar. Die Liste zeigt kompakt Rang, Turner, Verein und Total. Erst nach Antippen erscheinen die Details:
 
-- **Gesamt:** Total je Technikgerät, Total Technik, Total Athletik, Gesamt. Beweglichkeit und Kraft zählen nur im
-  Athletiktotal, auch wenn ein Krafttest organisatorisch an einem Gerät erfasst wird.
+- **Gesamt (gestuft):** nach dem Öffnen nur Total Technik, Total Athletik und Gesamt. Total Technik klappt auf zu den
+  Gerätetotalen, jedes Gerät weiter zu den Linien mit S und T; Total Athletik klappt auf zu Total Kraft und Total
+  Beweglichkeit, diese weiter zu den Einzeltests. Beweglichkeit und Kraft zählen nur im Athletiktotal, auch wenn ein
+  Krafttest organisatorisch an einem Gerät erfasst wird.
 - **Technik:** Total Technik und je Gerät ein einzeln aufklappbares Feld mit den Linien (S = gewertete SKS,
   T = Linienpunkte). Sprung AK9 heisst „Sprung 1“ / „Sprung 2“; bei AK10–AK12 erscheint die gewählte Alternative.
 - **Athletik:** jeder vorgesehene Beweglichkeits- und Krafttest, Total Beweglichkeit, Total Kraft, Total Athletik.
@@ -560,4 +562,10 @@ vorgesehenen Geräten und Linien (`code`, `anzeige`, bei Sprung-Alternativen `al
 (`code`, `test`). Die Struktur stammt nur aus dem Testprogramm (akMinMax, Athletikmodus) und enthält keine Resultate.
 Sie ist nötig, damit ein noch fehlendes Resultat als „–“ erscheinen kann. Ältere Stände ohne `struktur` (z. B.
 bestehende Archive) zeigen nur die veröffentlichten Linien und Tests.
+
+Jede Zeile `startliste` enthält `inhalt.rotation` = `{stationsfolge: [{station, bereich: technik|athletik}, …],
+rotationen, freigegeben}`: die Stationen in der Reihenfolge von `tab_startgeraet` und die geprüfte Freigabegrenze
+(`Public!B5`). Die Riege mit Startgerät an Position *i* steht in Rotation *r* an Station (*i* + *r* − 1) mod *n*
+(gleich wie `id_rotation` der Noteneingabe). Daraus zeigt die statische Seite unter Technik „Gerät & Rotation“; ältere
+Stände ohne `rotation` zeigen dort nur einen Hinweis.
 

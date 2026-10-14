@@ -120,6 +120,8 @@ STIL = """
 .tt-dz span, .tt-geraet > summary span, .tt-linie > span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .tt-dz b, .tt-geraet > summary b { color: #0D4E73; flex-shrink: 0; }
 .tt-dz.tt-total { font-weight: 600; }
+.tt-geraet.tt-total > summary { font-weight: 600; }
+.tt-stufe { padding: 0 0 4px 12px; }
 .tt-dz.tt-haupt { background: #0D4E73; color: #fff; border-radius: 4px; padding: 4px 8px; margin-top: 4px; }
 .tt-dz.tt-haupt b { color: #fff; }
 .tt-geraet > summary i { font-style: normal; color: #6FAFC9; font-size: 0.75rem; width: 1em; text-align: center;
@@ -543,25 +545,43 @@ def _dz(label: str, wert, klasse: str = "") -> str:
             f"<b>{_h(_zahl(wert))}</b></div>")
 
 
-def _details_gesamt(e: dict, d: dict, vorhanden: dict) -> str:
-    teile = ["<div class='tt-dtitel'>Technik je Gerät</div>"]
-    teile += [_dz(g["geraet"], g["total"]) for g in d["geraete"]]
-    teile += [_dz("Total Technik", e.get("technik") if vorhanden["technik"] else None, "tt-total"),
-              _dz("Total Athletik", e.get("athletik") if vorhanden["athletik"] else None, "tt-total"),
-              _dz("Gesamt", e.get("gesamt") if vorhanden["gesamt"] else None, "tt-total tt-haupt")]
-    return "".join(teile)
+def _aufklappbar(label: str, wert, inhalt: str, klasse: str = "tt-geraet") -> str:
+    """Zeile mit Wert, per Antippen aufklappbar (zu Beginn zu)."""
+    return (f"<details class='{klasse}'><summary><span>{_h(label)}</span><b>{_h(_zahl(wert))}</b><i></i></summary>"
+            f"{inhalt}</details>")
 
 
-def _details_technik(e: dict, d: dict, vorhanden: dict) -> str:
-    teile = [_dz("Total Technik", e.get("technik") if vorhanden["technik"] else None, "tt-total tt-haupt")]
+def _geraete(d: dict) -> list[str]:
+    """Je Gerät das Gerätetotal, aufklappbar zu den Linien mit S und T."""
+    teile = []
     for g in d["geraete"]:
         linien = "".join(
             f"<div class='tt-linie'><span>{_h(li['anzeige'])}{' (Alternative)' if li['alternative'] else ''}</span>"
             f"<span class='tt-st'>S {_h(_zahl(li['S']))}</span><b class='tt-st'>T {_h(_zahl(li['T']))}</b></div>"
             for li in g["linien"])
-        teile.append(f"<details class='tt-geraet'><summary><span>{_h(g['geraet'])}</span>"
-                     f"<b>{_h(_zahl(g['total']))}</b><i></i></summary><div class='tt-linien'>{linien}</div></details>")
-    return "".join(teile)
+        teile.append(_aufklappbar(g["geraet"], g["total"], f"<div class='tt-linien'>{linien}</div>"))
+    return teile
+
+
+def _details_gesamt(e: dict, d: dict, vorhanden: dict) -> str:
+    """Gestuft: Total Technik → Geräte → Linien; Total Athletik → Kraft/Beweglichkeit → Tests; Gesamt."""
+    athletik = []
+    for bereich in ("kraft", "beweglichkeit"):
+        tests = "".join(f"<div class='tt-linie'><span>{_h(t['test'])}</span><b class='tt-st'>{_h(_zahl(t['punkte']))}</b>"
+                        f"</div>" for t in d[bereich])
+        athletik.append(_aufklappbar(f"Total {q.BEREICH_ATHLETIK_TEXT[bereich]}",
+                                     e.get(bereich) if vorhanden[bereich] else None, f"<div class='tt-linien'>{tests}</div>"))
+    return "".join([
+        _aufklappbar("Total Technik", e.get("technik") if vorhanden["technik"] else None,
+                     f"<div class='tt-stufe'>{''.join(_geraete(d))}</div>", "tt-geraet tt-total"),
+        _aufklappbar("Total Athletik", e.get("athletik") if vorhanden["athletik"] else None,
+                     f"<div class='tt-stufe'>{''.join(athletik)}</div>", "tt-geraet tt-total"),
+        _dz("Gesamt", e.get("gesamt") if vorhanden["gesamt"] else None, "tt-total tt-haupt")])
+
+
+def _details_technik(e: dict, d: dict, vorhanden: dict) -> str:
+    return "".join([_dz("Total Technik", e.get("technik") if vorhanden["technik"] else None, "tt-total tt-haupt"),
+                    *_geraete(d)])
 
 
 def _details_athletik(e: dict, d: dict, vorhanden: dict) -> str:

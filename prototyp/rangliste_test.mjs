@@ -248,6 +248,118 @@ const gezeichnet = {};
   await ctx.close();
 }
 
+// ── 1d. Technik „Gerät & Rotation“ und gestufte Gesamtdetails ─────────────────────────────────────────────
+{
+  const { ctx, page } = await kontext({ width: 390, height: 844 }, true);
+  sb.stand = staende.r8; sb.status = "live"; sb.sichtbar = true; sb.netz = true;
+  const text = async () => (await page.innerHTML("#inhalt")).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const params = () => new URL(page.url()).searchParams;
+  const rotationen = () => page.locator("#rotation option").allTextContents();
+  // gestuft: nach dem Öffnen nur Total Technik, Total Athletik, Gesamt; Stufen zu Beginn zu
+  await page.goto(adresse("&ansicht=rangliste&p=AK5-AK9%2B&ak=AK+7"));
+  await bereit(page);
+  const lea = page.locator(".tt-rangkarte", { hasText: "Lea" });
+  await lea.locator("summary").first().click();
+  const sichtbar = await lea.locator(".tt-details > *").evaluateAll((xs) => xs.filter((x) => x.offsetParent !== null)
+    .map((x) => (x.tagName === "DETAILS" ? x.querySelector("summary").innerText : x.innerText).replace(/\s+/g, " ").trim()));
+  pruefe(JSON.stringify(sichtbar) === JSON.stringify(["Total Technik 16.5", "Total Athletik 8", "Gesamt 24.5"]),
+    `Gesamt: nur drei Zeilen nach dem Öffnen (${JSON.stringify(sichtbar)})`);
+  pruefe(await lea.locator(".tt-stufe .tt-linie").first().isHidden(), "Gesamt: Geräte/Linien erst nach weiterem Antippen");
+  await lea.locator("details.tt-total summary", { hasText: "Total Technik" }).click();
+  await lea.locator(".tt-stufe details.tt-geraet summary", { hasText: "Boden" }).click();
+  pruefe(await lea.locator(".tt-linie", { hasText: "Synth Boden vorwärts" }).first().isVisible(), "Total Technik → Boden → Linien S/T");
+  await lea.locator("details.tt-total summary", { hasText: "Total Athletik" }).click();
+  await lea.locator(".tt-stufe details.tt-geraet summary", { hasText: "Total Beweglichkeit" }).click();
+  pruefe(await lea.locator(".tt-linie", { hasText: "Bücke" }).first().isVisible()
+    && (await lea.locator(".tt-linie", { hasText: "Bücke" }).first().innerText()).replace(/\s+/g, " ").includes("Bücke 0"),
+  "Total Athletik → Total Beweglichkeit → Einzeltests (Nullwert 0)");
+  pruefe(await breite(page), "Smartphone: Gesamt gestuft geöffnet ohne waagrechte Scrollbar");
+  await page.screenshot({ path: `${bilder}/mobil-gesamt-gestuft.png`, fullPage: true });
+
+  sb.stand = staende.r2;
+  // Gerät & Rotation: Rotation 5 per Adresse bei Freigabe 2 → verworfen, nichts angezeigt
+  await page.goto(adresse("&ansicht=rangliste&p=AK5-AK9%2B&art=technik&sicht=rotation&g=Boden&r=5"));
+  await bereit(page);
+  pruefe(!params().has("r") && await page.inputValue("#rotation") === ""
+    && JSON.stringify(await rotationen()) === JSON.stringify(["bitte wählen", "Rotation 1", "Rotation 2"]),
+  `Freigabe 2: nur Rotation 1–2 wählbar, r=5 aus der Adresse verworfen (${new URL(page.url()).search})`);
+  pruefe((await text()).includes("Rotation wählen") && !(await text()).includes("Lea"), "ohne gewählte Rotation keine Riege (keine „aktuelle Rotation“)");
+  pruefe(JSON.stringify(await page.locator("#geraet option").allTextContents())
+    === JSON.stringify(["Boden", "Pferd", "Ringe", "Sprung", "Barren", "Trampolin", "Reck"]), "Geräte: Technikstationen in Stationsfolge");
+  pruefe((await page.textContent("#hinweise")).includes("Resultate bis Rotation 2 von 8 freigegeben."), "Hinweis Freigabe (keine laufende Rotation)");
+  pruefe(await page.locator("#sichten").isVisible() && await page.inputValue("#ak") === "Alle", "Umschalter sichtbar, AK optional (Alle)");
+  await page.selectOption("#rotation", "1");
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Riege Startgerät"));
+  pruefe(params().get("r") === "1" && params().get("g") === "Boden" && params().get("sicht") === "rotation", `Adresse ${new URL(page.url()).search}`);
+  pruefe((await text()).startsWith("Rotation 1 · Boden · Riege Startgerät Boden") && await page.locator("#inhalt .tt-rangkarte").count() === 1
+    && await page.locator("#inhalt .tt-rang").count() === 0, "Boden, Rotation 1: Riege Boden, ohne Rang");
+  await page.locator(".tt-rangkarte summary").first().click();
+  pruefe((await text()).includes("11.5 ▾ Gerätetotal Boden 11.5 Synth Boden vorwärts S 5 T 7.5 Synth Boden rückwärts S 4 T 4"),
+    `Linien S/T und Gerätetotal (${(await text()).slice(0, 220)})`);
+  await page.selectOption("#geraet", "Pferd");
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Pferd · Riege"));
+  const pferd = await page.locator("#inhalt .tt-rangkarte .tt-text strong").allTextContents();
+  const noten = await page.locator("#inhalt .tt-rangkarte .tt-note").allTextContents();
+  pruefe(pferd.length === 2 && pferd[0].startsWith("Max ") && pferd[1].startsWith("Nina "),
+    `Pferd, Rotation 1: Riege Pferd in Startreihenfolge (${pferd.join(", ")})`);
+  pruefe(JSON.stringify(noten) === JSON.stringify(["6", "–"]), `auch ohne Note gelistet (${noten.join(", ")})`);
+  await page.selectOption("#ak", "AK 6");
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("· AK 6"));
+  pruefe((await page.locator("#inhalt .tt-rangkarte .tt-text strong").allTextContents()).every((n) => n.startsWith("Nina")), "AK-Filter: nur AK 6");
+  await page.selectOption("#ak", "Alle");
+  await page.selectOption("#rotation", "2");
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Rotation 2 · Pferd · Riege Startgerät Boden"));
+  pruefe((await page.locator("#inhalt .tt-note").allTextContents()).join() === "5", "Pferd, Rotation 2: Riege Boden (Lea 5)");
+  await page.selectOption("#geraet", "Reck");
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("keine Riege eingeteilt"));
+  pruefe(true, "Reck, Rotation 2: keine Riege (Startgerät Trampolin leer)");
+  pruefe(await breite(page), "Smartphone: Gerät & Rotation ohne waagrechte Scrollbar");
+  // Freigabe sinkt: Rotation 8 gewählt, neue Publikation mit Freigabe 2 → Auswahl verworfen
+  sb.stand = staende.r8;
+  await page.goto(adresse("&ansicht=rangliste&p=AK5-AK9%2B&art=technik&sicht=rotation&g=Boden&r=8"));
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Rotation 8 · Boden · Riege Startgerät Pferd"));
+  pruefe((await rotationen()).length === 9, "Freigabe 8: Rotation 1–8 wählbar");
+  await page.screenshot({ path: `${bilder}/mobil-geraet-rotation.png`, fullPage: true });
+  sb.stand = staende.r2;
+  await page.waitForFunction(() => document.getElementById("rotation").value === "" && document.getElementById("inhalt").textContent.includes("Rotation wählen"),
+    null, { timeout: 15000 });
+  pruefe(!params().has("r") && !(await text()).includes("Max"), "Freigabe sinkt 8 → 2: Rotation 8 verworfen (auch aus der Adresse)");
+  // Freigabe 0 und ältere Publikation ohne Einteilung
+  sb.stand = staende.r0;
+  await page.goto(adresse("&ansicht=rangliste&p=AK5-AK9%2B&art=technik&sicht=rotation&r=1"));
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("noch keine Rotation freigegeben"));
+  pruefe(await page.isDisabled("#rotation") && !params().has("r") && !(await text()).includes("Lea"), "Freigabe 0: keine Rotation wählbar");
+  sb.stand = staende.ohne_struktur;
+  await page.goto(adresse("&ansicht=rangliste&p=AK5-AK9%2B&art=technik&sicht=rotation&r=1"));
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("nicht verfügbar"));
+  pruefe(!(await text()).includes("Lea"), "ältere Publikation ohne Einteilung: Hinweis statt geratener Einteilung");
+  // Korrektur während der Anzeige: offene Karte bleibt offen
+  sb.stand = staende.r8;
+  await page.goto(adresse("&ansicht=rangliste&p=AK5-AK9%2B&art=technik&sicht=rotation&g=Boden&r=1"));
+  await page.waitForSelector("#inhalt .tt-rangkarte");
+  await page.locator(".tt-rangkarte summary").first().click();
+  sb.stand = staende.korrektur;
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("T 9"), null, { timeout: 15000 });
+  pruefe(await page.locator("#inhalt details[open]").count() === 1, "Korrektur sichtbar, geöffnete Karte bleibt offen");
+  // Umschalten Rangliste ⇄ Gerät & Rotation, Wechsel zu Live ohne Rotationsparameter
+  await page.click("[data-sicht=rangliste]");
+  await page.waitForSelector(".tt-rangliste .tt-rang");
+  pruefe(!params().has("sicht") && !params().has("r") && await page.locator("#filter2").isHidden(), "zurück zur Technik-Rangliste");
+  await page.click("[data-art=gesamt]");
+  pruefe(await page.locator("#sichten").isHidden(), "Umschalter nur bei Technik");
+  await page.click("[data-art=technik]");
+  const vor = sb.anfragen.length;
+  await page.click("[data-sicht=rotation]");
+  await page.waitForFunction(() => document.getElementById("inhalt").textContent.includes("Riege Startgerät"));
+  const neu = sb.anfragen.slice(vor);
+  pruefe(neu.length <= 1 && neu.every((a) => a.teil === "zeilen"), `Wechsel lädt höchstens eine Anfrage (${neu.map((a) => `${a.teil}:${a.bereich}`).join(",")})`);
+  pruefe(params().get("r") === "1", "gewählte Rotation bleibt beim Umschalten erhalten");
+  await page.click("[data-ansicht=live]");
+  await page.waitForSelector(".tt-liste .tt-karte");
+  pruefe(["art", "sicht", "g", "r"].every((k) => !params().has(k)) && await page.locator("#filter2").isHidden(), "Live: ohne Rotationsauswahl");
+  await ctx.close();
+}
+
 // ── 1c. Startliste und Zeitplan: Wechsel, Filter, Zurück, 30-s-Takt, Änderung, Unterbruch, verborgen, Archiv ──
 {
   const { ctx, page } = await kontext({ width: 390, height: 844 }, true);

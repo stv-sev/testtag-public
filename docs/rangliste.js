@@ -179,22 +179,32 @@
   const dz = (label, wert, klasse = "") => `<div class='tt-dz${klasse ? ` ${klasse}` : ""}'><span>${h(label)}</span>`
     + `<b>${h(zahl(wert))}</b></div>`;
 
+  // Aufklappbare Zeile mit Wert (zu Beginn zu); k: Schlüssel, damit sie bei einer Aktualisierung offen bleibt.
+  const aufklappbar = (label, wert, inhalt, k, klasse = "tt-geraet") => `<details class='${klasse}'`
+    + `${k === undefined ? "" : ` data-k='${h(k)}'`}><summary><span>${h(label)}</span><b>${h(zahl(wert))}</b><i></i>`
+    + `</summary>${inhalt}</details>`;
+
+  // Je Gerät das Gerätetotal, aufklappbar zu den Linien mit S und T.
+  const geraete = (d, k) => d.geraete.map((g, i) => aufklappbar(g.geraet, g.total, "<div class='tt-linien'>"
+    + g.linien.map((li) => `<div class='tt-linie'><span>${h(li.anzeige)}${li.alternative ? " (Alternative)" : ""}`
+      + `</span><span class='tt-st'>S ${h(zahl(li.S))}</span><b class='tt-st'>T ${h(zahl(li.T))}</b></div>`).join("")
+    + "</div>", k === undefined ? undefined : `${k}|${i}`));
+
   const DETAILS = {
-    gesamt(e, d, v) {
-      return ["<div class='tt-dtitel'>Technik je Gerät</div>", ...d.geraete.map((g) => dz(g.geraet, g.total)),
-        dz("Total Technik", v.technik ? e.technik : null, "tt-total"),
-        dz("Total Athletik", v.athletik ? e.athletik : null, "tt-total"),
-        dz("Gesamt", v.gesamt ? e.gesamt : null, "tt-total tt-haupt")].join("");
+    // Gestuft: Total Technik → Geräte → Linien; Total Athletik → Kraft/Beweglichkeit → Tests; Gesamt.
+    gesamt(e, d, v, k) {
+      const unter = (s) => (k === undefined ? undefined : `${k}|${s}`);
+      const athletik = ["kraft", "beweglichkeit"].map((b) => aufklappbar(`Total ${ATHLETIK_TEXT[b]}`, v[b] ? e[b] : null,
+        `<div class='tt-linien'>${d[b].map((t) => `<div class='tt-linie'><span>${h(t.test)}</span>`
+          + `<b class='tt-st'>${h(zahl(t.punkte))}</b></div>`).join("")}</div>`, unter(`a|${b}`)));
+      return [aufklappbar("Total Technik", v.technik ? e.technik : null,
+        `<div class='tt-stufe'>${geraete(d, unter("t")).join("")}</div>`, unter("t"), "tt-geraet tt-total"),
+      aufklappbar("Total Athletik", v.athletik ? e.athletik : null, `<div class='tt-stufe'>${athletik.join("")}</div>`,
+        unter("a"), "tt-geraet tt-total"),
+      dz("Gesamt", v.gesamt ? e.gesamt : null, "tt-total tt-haupt")].join("");
     },
     technik(e, d, v, k) {
-      const teile = [dz("Total Technik", v.technik ? e.technik : null, "tt-total tt-haupt")];
-      for (const [i, g] of d.geraete.entries()) {
-        const linien = g.linien.map((li) => `<div class='tt-linie'><span>${h(li.anzeige)}${li.alternative ? " (Alternative)" : ""}`
-          + `</span><span class='tt-st'>S ${h(zahl(li.S))}</span><b class='tt-st'>T ${h(zahl(li.T))}</b></div>`).join("");
-        teile.push(`<details class='tt-geraet'${k === undefined ? "" : ` data-k='${h(`${k}|${i}`)}'`}><summary><span>${h(g.geraet)}</span><b>${h(zahl(g.total))}</b><i></i>`
-          + `</summary><div class='tt-linien'>${linien}</div></details>`);
-      }
-      return teile.join("");
+      return [dz("Total Technik", v.technik ? e.technik : null, "tt-total tt-haupt"), ...geraete(d, k)].join("");
     },
     athletik(e, d, v) {
       const teile = [];
@@ -241,5 +251,5 @@
   }
 
   const ziel = typeof window !== "undefined" ? window : globalThis;
-  ziel.TT_RANGLISTE = Object.freeze({ ARTEN, ART_TEXT, details, karte, liste: liste_html, hatResultate });
+  ziel.TT_RANGLISTE = Object.freeze({ ARTEN, ART_TEXT, details, karte, liste: liste_html, hatResultate, geraete, zahl, summe });
 })();

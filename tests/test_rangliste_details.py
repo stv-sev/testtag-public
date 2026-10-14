@@ -93,10 +93,21 @@ class RanglisteDetails(unittest.TestCase):
                                   "Trampolin": None, "Reck": None})
         self.assertEqual((e["technik"], e["athletik"], e["gesamt"]), (16.5, 8, 24.5))
         self.assertEqual(sum(t for t in totals.values() if t is not None), e["technik"])  # passt zum Total
-        text = klartext(app.rang_karte(e, "gesamt", _eigene, d))
-        self.assertIn("Boden 11.5 Pferd 5 Ringe –", text)
-        self.assertIn("Total Technik 16.5 Total Athletik 8 Gesamt 24.5", text)
-        self.assertNotIn("Kraft", text)  # Kraft an den Ringen zählt nur im Athletiktotal
+        karte = app.rang_karte(e, "gesamt", _eigene, d)
+        details = karte.split("<div class='tt-details'>", 1)[1]
+        # nach dem Öffnen nur drei Zeilen: Total Technik und Total Athletik (aufklappbar, zu), Gesamt
+        stufen = details.split("<details class='tt-geraet tt-total'>")
+        self.assertEqual([klartext(x.split("</summary>")[0]) for x in stufen[1:]], ["Total Technik 16.5", "Total Athletik 8"])
+        self.assertEqual(klartext(stufen[0]), "")
+        self.assertNotIn(" open", karte)
+        text = klartext(karte)
+        # Total Technik → Gerätetotale → Linien mit S und T
+        self.assertIn("Total Technik 16.5 Boden 11.5 Synth Boden vorwärts S 5 T 7.5 Synth Boden rückwärts S 4 T 4 "
+                      "Pferd 5 Synth Scheren S 5 T 5 Ringe – Synth Schwünge S – T –", text)
+        # Total Athletik → Total Kraft / Total Beweglichkeit → Einzeltests (fehlend „–“, Nullwert 0)
+        self.assertIn("Total Athletik 8 Total Kraft 8 Standweitsprung 8 Klettern / Hangeln am Tau –", text)
+        self.assertIn("Total Beweglichkeit 0 Bücke 0 Arm-Rumpf-Winkel rücklings –", text)
+        self.assertTrue(text.endswith("Seitspagat – Gesamt 24.5"))
 
     # ── Technik ──
     def test_technik_details_lines_with_s_and_line_points(self):

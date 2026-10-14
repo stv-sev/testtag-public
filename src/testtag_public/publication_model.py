@@ -870,6 +870,7 @@ def build_state(sources: list[ProgramSource], *, observed_at: datetime | str,
             "rotation_freigegeben": p.rotation_max,
             "kraftmodus": p.modes[BEREICH_KRAFT],
             "beweglichkeitsmodus": p.modes[BEREICH_BEWEGLICHKEIT],
+            "stationsfolge": _stationsfolge(p),
             "quelle": {"datei": p.source.source.filename, "sha256": p.source.source.sha256,
                        "bytes": p.source.source.size_bytes},
         } for p in programs],
@@ -879,6 +880,17 @@ def build_state(sources: list[ProgramSource], *, observed_at: datetime | str,
         "ranglisten": ranglisten,
         "diagnose": {p.definition.name: p.diagnose for p in programs},
     }
+
+
+def _stationsfolge(program: ProgramResult) -> list[dict]:
+    """Stationen in der Reihenfolge von tab_startgeraet (= Rotationsfolge).
+
+    Eine Riege mit Startgerät an Position i steht in Rotation r an Station (i + r − 1) mod n. Das entspricht
+    `id_rotation` in `Noteneingabe` (am 14.10.2026 an allen vier Arbeitsmappen in 00-tool ohne Abweichung nachgeprüft).
+    """
+    athletik = set(ATHLETIK_GERAETECODE.values())
+    return [{"station": s.name, "bereich": "athletik" if s.geraet_code in athletik else BEREICH_TECHNIK}
+            for s in program.source.stations]
 
 
 def _startliste(program: ProgramResult) -> list[dict]:
@@ -906,12 +918,14 @@ def content_checksum(inhalt: dict) -> str:
 
 
 def _row(bereich: str, programm: str, ak: str, art: str, gruppen: list, hinweis: Optional[str] = None,
-         struktur: Optional[dict] = None) -> dict:
+         struktur: Optional[dict] = None, rotation: Optional[dict] = None) -> dict:
     inhalt = {"schema_version": SCHEMA_VERSION, "art": art, "gruppen": gruppen}
     if hinweis:
         inhalt["hinweis"] = hinweis
     if struktur is not None:
         inhalt["struktur"] = struktur
+    if rotation is not None:
+        inhalt["rotation"] = rotation
     return {"bereich": bereich, "programm": programm, "ak": ak, "inhalt": inhalt,
             "pruefsumme": content_checksum(inhalt)}
 
@@ -933,7 +947,10 @@ def publication_rows(state: dict) -> list[dict]:
             continue
         name = program["programm"]
         hint = _rotation_hint(program)
-        rows.append(_row("startliste", name, "", "startliste", state["startlisten"][name]))
+        # Rotationseinteilung für „Gerät & Rotation“: Stationsfolge und die geprüfte Freigabegrenze (Public!B5).
+        rows.append(_row("startliste", name, "", "startliste", state["startlisten"][name], rotation={
+            "stationsfolge": program["stationsfolge"], "rotationen": program["rotationen"],
+            "freigegeben": program["rotation_freigegeben"]}))
         for group in state["ranglisten"][name]:
             ak = group["ak"]
             live = [r for r in state["einzelwertungen"] if r["programm"] == name and r["ak"] == ak]

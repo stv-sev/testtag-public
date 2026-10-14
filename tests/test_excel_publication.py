@@ -306,6 +306,26 @@ class ListsTests(Base):
                                          "programm", "startgeraet"})
         self.assertEqual([g["startgeraet"] for g in state["startlisten"][AK9]], ["Boden", "Sprung", "Reck"])
 
+    def test_startliste_row_carries_station_order_and_released_rotation(self):
+        state = self.state(self.book(AK5, public={"published_rotation_max": 7}), self.book(AK9))
+        rows = {(r["bereich"], r["programm"]): r for r in pm.publication_rows(state)}
+        rot5 = rows[("startliste", AK5)]["inhalt"]["rotation"]
+        stationen = [s.name for s in ep.read_program_source(self.dir / "wb1.xlsx", wait_seconds=0,
+                                                              sleep=lambda _s: None).stations]
+        self.assertEqual([x["station"] for x in rot5["stationsfolge"]], stationen)  # Reihenfolge tab_startgeraet
+        self.assertEqual({x["station"]: x["bereich"] for x in rot5["stationsfolge"]}["Beweglichkeit"], "athletik")
+        self.assertTrue(all(x["bereich"] == "technik" for x in rot5["stationsfolge"] if x["station"] != "Beweglichkeit"))
+        self.assertEqual((rot5["rotationen"], rot5["freigegeben"]), (8, 7))  # Public!B5, nie B7
+        rot9 = rows[("startliste", AK9)]["inhalt"]["rotation"]
+        self.assertEqual((rot9["rotationen"], len(rot9["stationsfolge"])), (7, 7))
+        self.assertNotIn("Beweglichkeit", [x["station"] for x in rot9["stationsfolge"]])
+        # Freigabe ändert die Startlisten-Zeile (Prüfsumme), die Gruppen bleiben gleich
+        lower = self.state(self.book(AK5, public={"published_rotation_max": 3}), self.book(AK9))
+        row3 = next(r for r in pm.publication_rows(lower) if r["bereich"] == "startliste" and r["programm"] == AK5)
+        self.assertEqual(row3["inhalt"]["rotation"]["freigegeben"], 3)
+        self.assertEqual(row3["inhalt"]["gruppen"], rows[("startliste", AK5)]["inhalt"]["gruppen"])
+        self.assertNotEqual(row3["pruefsumme"], rows[("startliste", AK5)]["pruefsumme"])
+
     def test_display_texts_are_cleaned(self):
         people = testtag_spec(AK5)["participants"]
         people[0] = (1, "  Synthaler  ", "Lea   Sophie", 2018, " TV  Testdorf ", "AK 7", 7, "Boden")

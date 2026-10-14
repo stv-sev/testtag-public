@@ -1,5 +1,54 @@
 # Umstellung auf die statische Seite – Vorbereitung (Branch `umstellung-live-statisch`)
 
+## Nachtrag 14.10.2026: gestufte Gesamtdetails, Technik „Gerät & Rotation“
+
+Nichts produktiv umgeschaltet; `main`, Pages, Secrets, Excel und die öffentliche Publikation unverändert.
+
+**Vorprüfung Zelladressen** (alle Mappen in `00-tool`, nur gelesen über temporäre Kopie, Werte = Formeln):
+
+| Mappe | B2 `event_id` | B5 `published_rotation_max` | B6 aktiv | B7 Kraftmodus | B8 Beweglichkeit |
+|---|---|---|---|---|---|
+| 261009-Test-AK5-AK9plus | aargau-lenzburg-2026-10-09 | 7 | WAHR | vor_ort | vor_ort |
+| 261009-Test-AK9-AK12 | aargau-lenzburg-2026-10-09 | 6 | WAHR | extern | extern |
+| 261031-Test-AK5-AK9plus | aargau-lenzburg-2026-10-**31** | 7 | FALSCH | vor_ort | vor_ort |
+| 261031-Test-AK9-AK12 | aargau-lenzburg-2026-10-**09** (!) | 6 | FALSCH | extern | extern |
+
+Zuordnung unverändert: `Public!B5` = Rotationsgrenze, `Public!B7` = Kraftmodus (A-Spalte beschriftet); der Publisher
+liest B5 nur als `published_rotation_max` (`excel_probe.PUBLIC_FIELDS`) und B7 nur als Kraftmodus. **Offen:** In
+`261031-Test-AK9-AK12.xlsx` steht in B2 noch der Slug vom 9.10. – zusammen mit der AK5-Mappe bricht der Publisher mit
+`EVENT_WIDERSPRUCH` ab. `.env` zeigt weiterhin auf die 261009-Mappen.
+
+**Rotationseinteilung geprüft:** In allen vier Mappen entspricht `id_rotation` jeder Stationszeile der Noteneingabe
+der Formel Station = Stationsfolge[(Index Startgerät + r − 1) mod n] (2 882 Zeilen, 0 Abweichungen). Die bisher
+publizierte Startliste enthielt weder Stationsfolge noch Freigabegrenze (nur Hinweistext) → Publisher ergänzt.
+
+- **Publisher:** Zeile `startliste` je Programm neu mit `inhalt.rotation = {stationsfolge, rotationen, freigegeben}`
+  (Stationsfolge aus `tab_startgeraet`, `freigegeben` = geprüftes `Public!B5`). Ändert die Freigabe, ändert sich die
+  Prüfsumme der Startlisten-Zeile. Erst ein Publisher-Lauf mit diesem Branch bringt das Feld in die Publikation;
+  bis dahin zeigt „Gerät & Rotation“ „nicht verfügbar“.
+- **Gesamt gestuft** (statisch und Streamlit/Archiv gleich): nach dem Öffnen Total Technik, Total Athletik, Gesamt;
+  Total Technik → Gerätetotale → Linien S/T; Total Athletik → Total Kraft / Total Beweglichkeit → Einzeltests.
+  Totale aus der Publikation, keine Rangberechnung; offene Stufen bleiben bei Aktualisierungen offen.
+- **Technik „Gerät & Rotation“** (statisch, `&art=technik&sicht=rotation&g=…&r=…`): Programm, Gerät (nur
+  Technikstationen in Stationsfolge), Rotation 1 … `freigegeben`, AK optional. Zeigt die eingeteilte Riege in
+  Startlisten-Reihenfolge, auch ohne Note; bei veröffentlichten Resultaten Gerätetotal und Linien S/T; keine Ränge.
+  Ohne Wahl keine Riege („keine aktuelle Rotation“); `r` über der Freigabe wird verworfen (auch aus der Adresse);
+  Freigabe 0 → nichts wählbar; ältere Publikation ohne `rotation` → Hinweis statt Einteilung.
+
+**Tests:** pytest 327 bestanden (neu: Rotationsfeld der Startliste; gestufte Gesamtdetails). Browsertest gegen
+nachgebildete Data API: alle Prüfungen bestanden, neu u. a. Gerät & Rotation (Freigabe 0/2/8, Freigabe sinkt, r per
+Adresse, AK-Filter, leere Riege, Korrektur mit offener Karte, ältere Publikation) – **126 von 126 Ansichten identisch
+mit Streamlit** (102 Ranglisten). Mit lokal erzeugten Zeilen aus den echten Mappen (nichts publiziert): 91 von 91
+Kombinationen Programm × Gerät × Rotation stimmen mit `id_rotation` überein (beide Mappensätze).
+**Echte öffentliche Daten (nur lesend):** statische Übersicht = `quelle.lade_testtage` (1 Testtag, live; Gruppen,
+Reihenfolge, Ziele, Stand/Adresse; 390 und 1280 px), Übersicht → Testtag → Ranglisten/Startliste/Zeitplan/Live →
+„← Alle Testtage“ ohne Fehler; Gerät & Rotation zeigt „nicht verfügbar“ (Publikation ohne `rotation`). Die echte
+Publikation enthält zurzeit 0 Live-Resultate; Noten-Darstellung daher nur synthetisch geprüft.
+
+**Offen:** Startreihenfolge innerhalb der Riege = Startliste (Positionen rotieren je Gerät nicht, falls das in der
+Praxis anders ist, fehlt die Angabe); Gerät & Rotation gibt es nur statisch (nicht im Streamlit-Rückfall);
+Reihenfolge in Gesamt Kraft vor Beweglichkeit wie im Auftrag, in der Ebene Athletik weiterhin Beweglichkeit zuerst.
+
 ## Nachtrag 13.10.2026 abends: alle vier Ansichten und Übersicht statisch
 
 Die statische Seite zeigt jetzt **Live, Ranglisten, Startliste und Zeitplan** eines laufenden Testtags sowie ohne `?t=`
@@ -248,24 +297,6 @@ wechseln zur Rangliste, Publikation alle 30 s, je 6 min (`streamlit_wechsel.py`,
 
 (Lauf B ungültig: Messlaptop stand 38 min still.) Die App schlief an diesem Tag wegen Inaktivität (Wecken 25 s).
 
-## Vorgemerkt (noch nicht umgesetzt, Auftrag vom 13.10.2026)
+## Vorgemerkt vom 13.10.2026 – umgesetzt am 14.10.2026
 
-Live-Liste bleibt unverändert.
-
-1. **Gesamtrangliste, Details gestuft:** nach dem Öffnen nur «Total Technik», «Total Athletik», «Gesamt».
-   «Total Technik» aufklappbar zu den Gerätetotalen, jedes Gerät weiter zu den Linien mit S und T (wie Technik).
-   «Total Athletik» aufklappbar zu «Total Kraft» und «Total Beweglichkeit», darunter die Einzeltests. Fehlend «–»,
-   Nullwert 0. Veröffentlichte Totale/Ränge verbindlich, keine Rangberechnung im Browser.
-2. **Technik: zusätzliche Ansicht «Gerät & Rotation»** (bestehende Rangliste bleibt): Programm, Gerät, Rotation
-   wählbar, AK-Filter optional. Riegen und Turner, die in dieser Rotation an diesem Gerät eingeteilt sind, in
-   Startreihenfolge – auch ohne Note. Bei freigegebenen Resultaten Linien S/T und Gerätetotal. Keine Geräteränge.
-   Einteilung aus Startgerät, Riege und Stationsfolge des Programms ableiten, nicht aus Noten. Zuerst prüfen, ob die
-   veröffentlichten Startlisten alles Nötige enthalten; fehlende Angaben im Publisher ergänzen.
-3. **Rotationsfilter = Freigabe:** je Programm nur Rotationen 1 … `published_rotation_max` (aus der geprüften
-   Publikation, nie direkt aus Excel); Beispiel 7 von 8 → nur 1–7, Rotation 8 auch nicht per URL; Freigabe 0 → keine
-   Rotation. Sinkt/ändert sich die Freigabe, unzulässige Auswahl verwerfen. Unveröffentlichte Noten nirgends sichtbar.
-4. **Vorher prüfen:** Zelladressen in **beiden aktuellen Arbeitsmappen** – bisher `Public!B5` Rotationsgrenze,
-   `Public!B7` Kraftmodus. Bei Änderung neue Zuordnung dokumentieren und im Publisher konsistent verwenden;
-   `Public!B7` nie ungeprüft als Rotationsgrenze lesen.
-5. **Keine «aktuelle Rotation»:** Zuschauer wählt selbst; nichts aus Uhrzeit oder letzter Note ableiten; die
-   Publikationsgrenze nicht als laufende Rotation bezeichnen.
+Siehe Nachtrag 14.10.2026 oben. Live-Liste unverändert.

@@ -25,6 +25,13 @@
  * Ansichten; Startliste nur Programm, Zeitplan ohne Auswahl),
  * `&art=technik|athletik` Ebene der Rangliste (ohne: Gesamt). Ranglisten haben kein „Alle“: ohne passende Auswahl
  * gilt das erste Programm bzw. die erste AK; eine Live-Auswahl „Alle“ bleibt dabei erhalten.
+ *
+ * Technik „Gerät & Rotation“ (`&art=technik&sicht=rotation&g=<Gerät>&r=<Rotation>`, AK optional): die Riege, die in
+ * der gewählten Rotation am gewählten Gerät eingeteilt ist, in Startreihenfolge – auch ohne Note; Linien S/T und
+ * Gerätetotal nur aus veröffentlichten Resultaten, keine Geräteränge. Die Einteilung folgt aus Startgerät und
+ * Stationsfolge der Startlisten-Zeile (`inhalt.rotation`), nie aus Noten oder der Uhrzeit. Wählbar sind nur Rotationen
+ * 1 … `freigegeben` derselben geprüften Zeile (auch per Adresse); eine nicht mehr zulässige Auswahl wird verworfen.
+ * Es gibt keine „aktuelle Rotation“: ohne Wahl wird keine Riege gezeigt.
  */
 "use strict";
 (() => {
@@ -54,11 +61,13 @@
   const STATUS = ["live", "vorbereitet", "archiviert"];
   const VERALTET = "Aktualisierung vorübergehend nicht möglich – letzter gültiger Stand wird angezeigt";
   const R = window.TT_RANGLISTE;
+  const SICHTEN = ["rangliste", "rotation"];  // Technik: Rangliste oder Gerät & Rotation
 
   const $ = (id) => document.getElementById(id);
   const el = { titel: $("titel"), badge: $("badge"), stand: $("stand"), warnung: $("warnung"), nav: $("nav"),
     unter: $("unter"), filter: $("filter"), programm: $("programm"), ak: $("ak"), arten: $("arten"), hinweise: $("hinweise"),
-    inhalt: $("inhalt"), zurueck: $("zurueck") };
+    inhalt: $("inhalt"), zurueck: $("zurueck"), sichten: $("sichten"), filter2: $("filter2"), geraet: $("geraet"),
+    rotation: $("rotation") };
 
   // ── Hilfen ────────────────────────────────────────────────────────────────────────────────────────
   const h = (t) => String(t ?? "").replace(/[&<>"']/g, (z) => `&#${z.charCodeAt(0)};`);
@@ -161,16 +170,17 @@
   let angezeigt = "";          // zuletzt gezeichnetes HTML der Liste
   let auswahlOffen = false;    // Auswahl während eines Takts geändert: sofort nachladen
   let taktOffen = false;       // Takt fiel in ein gezieltes Nachladen: danach sofort nachholen
-  const auswahl = { programm: ALLE, ak: ALLE };
+  const auswahl = { programm: ALLE, ak: ALLE, geraet: null, rotation: null };  // rotation: nur vom Zuschauer gewählt
   let ansicht = "live";        // live | rangliste | startliste | zeitplan
   let taktMs = TAKT_LIVE;      // aktueller Abstand der Änderungsabfrage
   let art = "gesamt";          // Ebene der Rangliste
+  let sicht = "rangliste";     // Technik: rangliste | rotation (Gerät & Rotation)
 
   function vergessen() {
     testtag = null; koepfe = new Map(); zeilen = new Map(); nachholen = true; angezeigt = "";
     el.inhalt.innerHTML = ""; el.hinweise.innerHTML = ""; el.stand.textContent = "";
-    el.filter.hidden = true; el.nav.hidden = true; el.arten.hidden = true;
-    for (const s of [el.programm, el.ak]) { s.innerHTML = ""; delete s.dataset.html; }
+    el.filter.hidden = true; el.nav.hidden = true; el.arten.hidden = true; el.sichten.hidden = true; el.filter2.hidden = true;
+    for (const s of [el.programm, el.ak, el.geraet, el.rotation]) { s.innerHTML = ""; delete s.dataset.html; }
   }
 
   function testtagAusZeile(r) {
@@ -186,7 +196,8 @@
     return r.length ? testtagAusZeile(r[0]) : null;
   }
 
-  const bereiche = () => [...z.ansichten].map((a) => BEREICH[a]);
+  // Gerät & Rotation (Teil der Ranglisten) braucht die Startlisten-Zeile auch ohne Startlisten-Ansicht.
+  const bereiche = () => [...new Set([...z.ansichten].flatMap((a) => (a === "rangliste" ? [RANGLISTE, STARTLISTE] : [BEREICH[a]])))];
   const bereichFilter = (b) => (b.length === 1 ? `eq.${b[0]}` : `in.(${b.join(",")})`);
 
   async function ladeKoepfe(id) {
@@ -236,7 +247,23 @@
     return { programme, programm: programme.includes(auswahl.programm) ? auswahl.programm : ALLE };
   }
 
+  const rotationsSicht = () => ansicht === "rangliste" && art === "technik" && sicht === "rotation";
+
+  // Gerät & Rotation: Programm mit Startliste (kein „Alle“), AK optional.
+  function rotationsAuswahl(kp) {
+    const programme = programmeIn(kp, STARTLISTE);
+    const programm = programme.includes(auswahl.programm) ? auswahl.programm : programme[0];
+    const aks = programm ? aksIn(kp, RANGLISTE, programm) : [];
+    return { programme, programm, aks, ak: aks.includes(auswahl.ak) ? auswahl.ak : ALLE };
+  }
+
   function benoetigt(kp) {
+    if (rotationsSicht()) {
+      const { programm, ak } = rotationsAuswahl(kp);
+      if (!programm) return [];
+      return [...kp.entries()].filter(([, k]) => k.programm === programm && (k.bereich === STARTLISTE
+        || (k.bereich === LIVE && (ak === ALLE || k.ak === ak)))).map(([s]) => s);
+    }
     if (ansicht === "startliste") {
       const { programm } = startlistenAuswahl(kp);
       return [...kp.entries()].filter(([, k]) => k.bereich === STARTLISTE && (programm === ALLE || k.programm === programm))
@@ -260,12 +287,25 @@
       for (const g of inhalt.gruppen) for (const x of (Array.isArray(g.resultate) ? g.resultate : [])) if (x && typeof x === "object") resultate.push(x);
       return { resultate: sortiere(resultate) };
     }
-    if (bereich === STARTLISTE || bereich === ZEITPLAN) return { gruppen: inhalt.gruppen };
+    if (bereich === STARTLISTE) return { gruppen: inhalt.gruppen, rotation: pruefeRotation(inhalt.rotation) };
+    if (bereich === ZEITPLAN) return { gruppen: inhalt.gruppen };
     const gruppen = inhalt.gruppen.map((g) => ({ liste: g.liste,
       eintraege: (Array.isArray(g.eintraege) ? g.eintraege : []).filter((e) => e && typeof e === "object") }));
     const struktur = inhalt.struktur && typeof inhalt.struktur === "object" && !Array.isArray(inhalt.struktur)
       ? inhalt.struktur : null;  // ältere Publikationen ohne struktur: Gliederung aus den Resultaten
     return { gruppen, struktur };
+  }
+
+  // Rotationseinteilung der Startlisten-Zeile; null = fehlt (ältere Publikation) oder widersprüchlich → nicht anzeigen.
+  function pruefeRotation(r) {
+    if (!r || typeof r !== "object" || !Array.isArray(r.stationsfolge)) return null;
+    const folge = r.stationsfolge;
+    const namen = folge.map((x) => (x && typeof x === "object" && typeof x.station === "string" && x.station ? x.station : null));
+    if (!folge.length || namen.includes(null) || new Set(namen).size !== namen.length
+        || !folge.every((x) => x.bereich === "technik" || x.bereich === "athletik")) return null;
+    if (r.rotationen !== folge.length || !Number.isInteger(r.freigegeben) || r.freigegeben < 0 || r.freigegeben > r.rotationen) return null;
+    return { stationen: folge.map((x) => ({ station: x.station, technik: x.bereich === "technik" })), rotationen: r.rotationen,
+      freigegeben: r.freigegeben };
   }
 
   // Lädt fehlende/geänderte Zeilen der Ansicht in einer Anfrage; ersetzt erst, wenn alle geprüft sind.
@@ -348,7 +388,9 @@
     try {
       const u = new URL(location.href);
       const werte = [["ansicht", ansicht === "live" ? null : ansicht], ["p", auswahl.programm === ALLE ? null : auswahl.programm],
-        ["ak", auswahl.ak === ALLE ? null : auswahl.ak], ["art", ansicht === "rangliste" && art !== "gesamt" ? art : null]];
+        ["ak", auswahl.ak === ALLE ? null : auswahl.ak], ["art", ansicht === "rangliste" && art !== "gesamt" ? art : null],
+        ["sicht", rotationsSicht() ? sicht : null], ["g", rotationsSicht() && auswahl.geraet ? auswahl.geraet : null],
+        ["r", rotationsSicht() && auswahl.rotation ? String(auswahl.rotation) : null]];
       for (const [k, v] of werte) { if (v === null) u.searchParams.delete(k); else u.searchParams.set(k, v); }
       if (u.href !== location.href) history[neuerEintrag ? "pushState" : "replaceState"](null, "", u);
     } catch { /* ohne Adresszeile weiter */ }
@@ -407,7 +449,7 @@
   // Link innerhalb dieser Seite (gleicher Testtag, aktuelle Auswahl).
   function eigenerLink(ziel) {
     const u = new URL(location.href);
-    u.searchParams.delete("art");
+    for (const k of ["art", "sicht", "g", "r"]) u.searchParams.delete(k);
     if (ziel === "live") u.searchParams.delete("ansicht"); else u.searchParams.set("ansicht", ziel);
     return u.pathname + u.search;
   }
@@ -479,7 +521,8 @@
     document.title = `${testtag.titel} – ${TITEL[ansicht]}`;
     el.badge.innerHTML = badge(testtag.status);
     navigation();
-    if (ansicht !== "rangliste") el.arten.hidden = true;
+    if (ansicht !== "rangliste") { el.arten.hidden = true; el.sichten.hidden = true; }
+    el.filter2.hidden = true;
     el.ak.closest("label").hidden = ansicht === "startliste";
     if (ansicht === "rangliste") zeichneRangliste();
     else if (ansicht === "startliste") zeichneStartliste();
@@ -530,7 +573,7 @@
     el.hinweise.innerHTML = "";
     const { programme, programm, aks, ak } = ranglistenAuswahl(koepfe);
     if (!programme.length) {
-      el.filter.hidden = true; el.arten.hidden = true;
+      el.filter.hidden = true; el.arten.hidden = true; el.sichten.hidden = true;
       setzeInhalt("<div class='tt-leer'>Es ist noch keine Rangliste veröffentlicht.</div>", { n: 0 });
       return;
     }
@@ -538,6 +581,9 @@
     optionen(el.programm, programme, programm, programmText, false);
     optionen(el.ak, aks, ak, (a) => a, false);
     for (const b of el.arten.querySelectorAll("[data-art]")) b.setAttribute("aria-checked", String(b.dataset.art === art));
+    el.sichten.hidden = art !== "technik";
+    for (const b of el.sichten.querySelectorAll("[data-sicht]")) b.setAttribute("aria-checked", String(b.dataset.sicht === sicht));
+    if (rotationsSicht()) { zeichneRotation(); return; }
     const sr = schluessel(RANGLISTE, programm, ak);
     const sl = schluessel(LIVE, programm, ak);
     if (!zeilen.has(sr) || (koepfe.has(sl) && !zeilen.has(sl))) {
@@ -553,6 +599,96 @@
     const alle = zeilen.has(sl) ? zeilen.get(sl).resultate : [];
     setzeInhalt(R.liste(eintraege, art, alle, zeilen.get(sr).struktur, koepfe.get(sr).hinweis, true),
       { n: eintraege.length, erster: kurz(alle[0]), pruef: zeilen.get(sr).pruefsumme });
+  }
+
+  // Technik „Gerät & Rotation“: eingeteilte Riege in Startreihenfolge; Noten nur, soweit veröffentlicht.
+  function zeichneRotation() {
+    const { programme, programm, aks, ak } = rotationsAuswahl(koepfe);
+    optionen(el.programm, programme, programm, programmText, false);
+    optionen(el.ak, aks, ak, (a) => a, true);
+    const info = (n, mehr) => ({ n, sicht: "rotation", ...mehr });
+    const leer = (text, n = 0) => {
+      el.filter2.hidden = true; el.hinweise.innerHTML = "";
+      setzeInhalt(`<div class='tt-leer'>${h(text)}</div>`, info(n));
+    };
+    if (!programm) { leer("Es ist noch keine Startliste veröffentlicht."); return; }
+    const schl = benoetigt(koepfe);
+    if (!schl.every((s) => zeilen.has(s))) { leer("Wird geladen …", -1); return; }
+    const start = zeilen.get(schluessel(STARTLISTE, programm, ""));
+    const rot = start && start.rotation;
+    if (!rot) { leer("Die Einteilung nach Gerät und Rotation ist für diese Publikation nicht verfügbar."); return; }
+
+    const geraete = rot.stationen.filter((s) => s.technik).map((s) => s.station);
+    const geraet = geraete.includes(auswahl.geraet) ? auswahl.geraet : geraete[0];
+    let verworfen = false;
+    if (auswahl.rotation !== null && !(auswahl.rotation >= 1 && auswahl.rotation <= rot.freigegeben)) {
+      auswahl.rotation = null; verworfen = true;  // Freigabe gesunken oder anderes Programm: nicht zulässig
+    }
+    if (auswahl.geraet !== null && geraet !== auswahl.geraet) { auswahl.geraet = null; verworfen = true; }
+    if (verworfen) adresse(false);
+    el.filter2.hidden = false;
+    optionen(el.geraet, geraete, geraet, (g) => g, false);
+    const html = [`<option value=""${auswahl.rotation === null ? " selected" : ""}>${rot.freigegeben ? "bitte wählen" : "keine freigegeben"}</option>`,
+      ...Array.from({ length: rot.freigegeben }, (_, i) => `<option value="${i + 1}"${i + 1 === auswahl.rotation ? " selected" : ""}>`
+        + `Rotation ${i + 1}</option>`)].join("");
+    if (el.rotation.dataset.html !== html) { el.rotation.innerHTML = html; el.rotation.dataset.html = html; }
+    el.rotation.value = auswahl.rotation === null ? "" : String(auswahl.rotation);
+    el.rotation.disabled = !rot.freigegeben;
+    el.hinweise.innerHTML = `<div>${h(programmText(programm))}: ${h(rot.freigegeben >= rot.rotationen ? "Alle Rotationen freigegeben."
+      : rot.freigegeben ? `Resultate bis Rotation ${rot.freigegeben} von ${rot.rotationen} freigegeben.`
+        : "Noch keine Rotation freigegeben.")}</div>`;
+    if (!rot.freigegeben) {
+      setzeInhalt("<div class='tt-leer'>Für dieses Programm ist noch keine Rotation freigegeben.</div>", info(0));
+      return;
+    }
+    if (auswahl.rotation === null) {
+      setzeInhalt("<div class='tt-leer'>Rotation wählen, um die an diesem Gerät eingeteilte Riege zu sehen.</div>", info(0));
+      return;
+    }
+
+    // Riege mit Startgerät an Position s steht in Rotation r an Station (s + r − 1) mod n (Stationsfolge des Programms).
+    const n = rot.stationen.length;
+    const idx = rot.stationen.findIndex((s) => s.station === geraet);
+    const startgeraet = rot.stationen[(((idx - (auswahl.rotation - 1)) % n) + n) % n].station;
+    const riege = start.gruppen.find((g) => g.startgeraet === startgeraet);
+    const turner = (riege && Array.isArray(riege.teilnehmer) ? riege.teilnehmer : [])
+      .filter((t) => t && typeof t === "object" && (ak === ALLE || t.ak === ak))
+      .sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
+    const resultate = new Map();  // nur veröffentlichte Technikresultate dieses Geräts (Publikation enthält nur Freigegebenes)
+    for (const s of schl) {
+      for (const r of zeilen.get(s).resultate || []) {
+        if (r.bereich !== "technik" || r.geraet !== geraet || !(Number.isInteger(r.rotation) && r.rotation <= rot.freigegeben)) continue;
+        if (!resultate.has(r.teilnehmer)) resultate.set(r.teilnehmer, []);
+        resultate.get(r.teilnehmer).push(r);
+      }
+    }
+    const kopf = `<div class='tt-anzahl'>Rotation ${h(auswahl.rotation)} · ${h(geraet)} · Riege Startgerät ${h(startgeraet)}`
+      + `${ak === ALLE ? "" : ` · ${h(ak)}`}</div>`;
+    if (!turner.length) {
+      setzeInhalt(`${kopf}<div class='tt-leer'>${riege && riege.teilnehmer && riege.teilnehmer.length
+        ? "In dieser Riege turnt niemand dieser Altersklasse." : "In dieser Rotation ist an diesem Gerät keine Riege eingeteilt."}</div>`,
+      info(0, { riege: startgeraet }));
+      return;
+    }
+    const karten = turner.map((t) => {
+      const eigene = (resultate.get(t.teilnehmer) || []).slice()
+        .sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
+      const total = eigene.length ? R.summe(eigene.map((r) => r.T)) : null;
+      const linien = eigene.map((r) => `<div class='tt-linie'><span>${h(r.anzeige)}</span><span class='tt-st'>S ${h(R.zahl(r.S))}</span>`
+        + `<b class='tt-st'>T ${h(R.zahl(r.T))}</b></div>`).join("");
+      const inhalt = eigene.length
+        ? `<div class='tt-dz tt-total'><span>Gerätetotal ${h(geraet)}</span><b>${h(R.zahl(total))}</b></div><div class='tt-linien'>${linien}</div>`
+        : "<div class='tt-dhinweis'>Noch kein veröffentlichtes Resultat an diesem Gerät.</div>";
+      const meta = [t.verein, t.ak].filter(Boolean).map(h).join(" · ");
+      return `<div class='tt-karte tt-rangkarte'><details data-k='${h(`rot|${geraet}|${auswahl.rotation}|${t.teilnehmer}`)}'><summary>`
+        + `<div class='tt-karte-kopf'><div class='tt-nr' title='Startposition ${h(t.position)}'>${h(t.position)}</div>`
+        + `<div class='tt-text'><strong>${h(t.vorname)} ${h(t.name)}</strong><small>${meta}</small></div>`
+        + `<div class='tt-wert'><div class='tt-note'>${h(R.zahl(total))}</div></div><i class='tt-pfeil'>▾</i></div>`
+        + `</summary><div class='tt-details'>${inhalt}</div></details></div>`;
+    });
+    setzeInhalt(`${kopf}<div class='tt-liste tt-rangliste'>${karten.join("")}</div><div class='tt-anzahl'>In Startreihenfolge, `
+      + "ohne Rang. – = noch kein veröffentlichtes Resultat. Turner antippen für die Linien; T = Linienpunkte.</div>",
+    info(turner.length, { riege: startgeraet, mitNote: turner.filter((t) => resultate.has(t.teilnehmer)).length }));
   }
 
   // Wie app._startliste: je Programm die Gruppen nach Startgerät/Riege (leere Gruppen entfallen).
@@ -716,6 +852,9 @@
     auswahl.programm = a.get("p") || ALLE;
     auswahl.ak = a.get("ak") || ALLE;
     art = R && R.ARTEN.includes(a.get("art")) ? a.get("art") : "gesamt";
+    sicht = SICHTEN.includes(a.get("sicht")) ? a.get("sicht") : "rangliste";
+    auswahl.geraet = a.get("g") || null;
+    auswahl.rotation = /^[1-9]\d?$/.test(a.get("r") || "") ? Number(a.get("r")) : null;  // Grenze prüft zeichneRotation
   }
 
   // ── Start ─────────────────────────────────────────────────────────────────────────────────────────
@@ -758,10 +897,20 @@
     auswahl.programm = el.programm.value; auswahl.ak = ALLE; adresse(false); auswahlGeaendert();
   });
   el.ak.addEventListener("change", () => { auswahl.ak = el.ak.value; adresse(false); auswahlGeaendert(); });
+  el.geraet.addEventListener("change", () => { auswahl.geraet = el.geraet.value; adresse(false); zeichne(); });
+  el.rotation.addEventListener("change", () => {
+    auswahl.rotation = /^[1-9]\d?$/.test(el.rotation.value) ? Number(el.rotation.value) : null;
+    adresse(false); zeichne();
+  });
+  el.sichten.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-sicht]");
+    if (!b || b.dataset.sicht === sicht) return;
+    sicht = b.dataset.sicht; angezeigt = ""; adresse(false); auswahlGeaendert();
+  });
   el.arten.addEventListener("click", (e) => {
     const b = e.target.closest("[data-art]");
     if (!b || b.dataset.art === art) return;
-    art = b.dataset.art; adresse(false); zeichne();
+    art = b.dataset.art; adresse(false); auswahlGeaendert();
   });
   el.nav.addEventListener("click", (e) => {
     const a = e.target.closest("[data-ansicht]");

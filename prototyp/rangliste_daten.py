@@ -8,10 +8,12 @@ Testtags – nur erfundene Personen – und speichert je Stand die Zeilen `veroe
 erwartete Darstellung jeder Rangliste (Programm × AK × Ebene), der Startliste (alle Programme und je Programm) und
 des Zeitplans als Klartext, erzeugt mit app.rang_karte, quelle.turner_details, app.startliste_tabelle und dem Aufbau
 von app._zeitplan – also genau so, wie die Streamlit-App sie zeigt:
+  r0            noch keine Rotation freigegeben (AK5–AK9+)
   r2            Rotationsgrenze: nur Rotation 1–2 freigegeben (Athletik noch offen)
   r8            alle Rotationen freigegeben (neue Resultate gegenüber r2)
   korrektur     korrigierte Note (Rang- und Totaländerung) und erstes Resultat einer bisher leeren Person
-  ohne_struktur ältere Publikation ohne `struktur`, dazu ein Eintrag mit widersprüchlichem Total
+  ohne_struktur ältere Publikation ohne `struktur` und ohne Rotationseinteilung der Startliste, dazu ein Eintrag mit
+                widersprüchlichem Total
   gross         optional: vollständig gefüllter Testtag (108 Personen, alle Resultate) aus <voll-ordner>
 `vergleichen` prüft die im Browser gezeichneten Ansichten (rangliste_test.mjs) gegen diese Erwartung.
 """
@@ -113,7 +115,8 @@ def erzeugen(ziel: Path, voll: Path | None):
 
     staende, vorher = [], None
     korrigiert = {**noten5, (1, "Boden", 1): (6, 1.5, 9), (5, "Reck", 1): (3, 1, 3)}  # Korrektur + erstes Resultat
-    for name, rotation, noten, zeit in (("r2", 2, noten5, "2026-10-09T08:00:00Z"), ("r8", 8, noten5, "2026-10-09T08:10:00Z"),
+    for name, rotation, noten, zeit in (("r0", 0, noten5, "2026-10-09T07:50:00Z"), ("r2", 2, noten5, "2026-10-09T08:00:00Z"),
+                                        ("r8", 8, noten5, "2026-10-09T08:10:00Z"),
                                         ("korrektur", 8, korrigiert, "2026-10-09T08:20:00Z")):
         state = zustand(name, rotation, noten, zeit, vorher)
         vorher = state
@@ -121,6 +124,8 @@ def erzeugen(ziel: Path, voll: Path | None):
     # ältere Publikation ohne struktur; ein Eintrag mit widersprüchlichem Total (Aufschlüsselung entfällt)
     alt = json.loads(json.dumps(staende[-1][2]))
     for z in alt:
+        if z["bereich"] == q.STARTLISTE:
+            z["inhalt"].pop("rotation", None)
         if z["bereich"] == q.RANGLISTE:
             z["inhalt"].pop("struktur", None)
             if z["programm"] == AK5 and z["ak"] == "AK 7":

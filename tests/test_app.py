@@ -381,11 +381,14 @@ class AppTests(unittest.TestCase):
         kompakt = [klartext(k.split("</summary>")[0]) for k in karten]  # Liste: Rang, Turner, Verein, Total
         self.assertEqual(kompakt[0], "1 Lea Synthaler TV Testdorf 15.5 ▾")
         self.assertNotIn("tt-chip", rl)
-        erste = klartext(karten[0].split("</summary>")[1])  # Details erst nach Antippen
-        self.assertIn("Technik je Gerät Boden 7.5 Pferd – Ringe –", erste)
-        self.assertIn("Total Technik 7.5 Total Athletik 8 Gesamt 15.5", erste)
-        ohne = klartext(karten[-1].split("</summary>")[1])  # Person ohne Resultat: keine scheinbaren Nullwerte
-        self.assertIn("Total Technik – Total Athletik – Gesamt –", ohne)
+        erste = klartext(karten[0].split("</summary>", 1)[1])  # Details erst nach Antippen
+        self.assertIn("Total Technik 7.5 Boden 7.5 Synth Boden vorwärts S 5 T 7.5", erste)  # gestuft
+        self.assertIn("Total Athletik 8 Total Kraft 8 Standweitsprung 8", erste)
+        self.assertIn("Seitspagat – Gesamt 15.5", erste)
+        ohne = klartext(karten[-1].split("</summary>", 1)[1])  # Person ohne Resultat: keine scheinbaren Nullwerte
+        self.assertTrue(ohne.startswith("Total Technik – Boden –"), ohne)
+        self.assertIn("Total Athletik – Total Kraft –", ohne)
+        self.assertIn("Seitspagat – Gesamt –", ohne)
         at.radio(key="rl_art").set_value("technik").run()
         rl = self.block(at, "tt-liste tt-rangliste")
         self.assertIn("Boden 7.5 Synth Boden vorwärts S 5 T 7.5", klartext(rl))  # Gerät aufklappbar, S/T

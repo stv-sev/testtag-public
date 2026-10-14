@@ -77,6 +77,8 @@ body { margin: 0; background: #fff; color: #0D4E73; font-family: "Source Sans Pr
 .tt-dz span, .tt-geraet > summary span, .tt-linie > span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .tt-dz b, .tt-geraet > summary b { color: #0D4E73; flex-shrink: 0; }
 .tt-dz.tt-total { font-weight: 600; }
+.tt-geraet.tt-total > summary { font-weight: 600; }
+.tt-stufe { padding: 0 0 4px 12px; }
 .tt-dz.tt-haupt { background: #0D4E73; color: #fff; border-radius: 4px; padding: 4px 8px; margin-top: 4px; }
 .tt-dz.tt-haupt b { color: #fff; }
 .tt-geraet > summary i { font-style: normal; color: #6FAFC9; font-size: .75rem; width: 1em; text-align: center;
